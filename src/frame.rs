@@ -8,8 +8,9 @@
 //! simple frames are valid at their creation. We do that because we want to pay the cost of checking
 //! this property only if needed as it is expensive.
 
-use std::io::{Read, BufReader, BufRead};
-use std::io::ErrorKind;
+use std::io;
+use std::io::{BufRead, BufReader, Read};
+use std::io::{BufWriter, ErrorKind, Write};
 use tracing::{debug, error, warn};
 
 const CR: u8 = b'\r';
@@ -85,9 +86,68 @@ enum FrameData {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct Frame {
+pub(crate) struct Frame {
     frame_type: FrameID,
     frame_data: FrameData,
+}
+
+impl Frame {
+    pub(crate) fn as_array(&self) -> io::Result<&Vec<Frame>> {
+        match (self.frame_type, &self.frame_data) {
+            (FrameID::Array, FrameData::Nested(vec)) => Ok(&vec),
+            _ => Err(io::Error::new(
+                ErrorKind::InvalidInput,
+                "commands can only be parsed from Arrays",
+            )),
+        }
+    }
+
+    /// bulk_as_string returns the inner string of a Bulk frame type or None.
+    pub(crate) fn bulk_as_string(&self) -> Option<&String> {
+        match (self.frame_type, &self.frame_data) {
+            (FrameID::BulkString, FrameData::Bulk(_, content)) => Some(content),
+            _ => None,
+        }
+    }
+
+    fn write(&self, stream: &mut BufWriter<impl Write>) -> io::Result<()> {
+        match (self.frame_type, &self.frame_data) {
+            (FrameID::Integer, FrameData::Integer(content)) => {
+                write!(stream, ":{}\r\n", content)?;
+            }
+            (FrameID::SimpleString, FrameData::Simple(content)) => {
+                write!(stream, "+{}\r\n", content)?;
+            }
+            (FrameID::SimpleError, FrameData::Simple(content)) => {
+                write!(stream, "-{}\r\n", content)?;
+            }
+            (FrameID::BulkString, FrameData::Bulk(size, content)) => {
+                write!(stream, "${}\r\n{}\r\n", size, content)?;
+            }
+            (FrameID::BulkError, FrameData::Bulk(size, content)) => {
+                write!(stream, "!{}\r\n{}\r\n", size, content)?;
+            }
+            (FrameID::Boolean, FrameData::Boolean(content)) => {
+                let content = if *content { "t" } else { "f" };
+                write!(stream, "#{}\r\n", content)?;
+            }
+            (FrameID::Null, FrameData::Null) => {
+                write!(stream, "_\r\n")?;
+            }
+            (FrameID::BigNumber, FrameData::Simple(content)) => {
+                write!(stream, "({}\r\n", content)?;
+            }
+            (FrameID::Array, FrameData::Nested(content)) => {
+                write!(stream, "*{}\r\n", content.len())?;
+                for f in content {
+                    f.write(stream)?
+                }
+            }
+            // this case can never happen
+            _ => unreachable!(),
+        }
+        stream.flush()
+    }
 }
 
 fn validate_bool(data: String) -> Result<bool, FrameError> {
@@ -123,10 +183,7 @@ where
     }
 }
 
-fn process_simple_frames<T>(
-    id: FrameID,
-    stream: &mut BufReader<T>,
-) -> Result<Frame, FrameError>
+fn process_simple_frames<T>(id: FrameID, stream: &mut BufReader<T>) -> Result<Frame, FrameError>
 where
     T: Read,
 {
@@ -176,10 +233,7 @@ where
 
 /// process_non_aggregate is a helper to decode non-aggregate frames. It calls the appropriate
 /// processing method depending on the frame type. It should not receive an aggregate type.
-fn process_non_aggregate<T>(
-    id: FrameID,
-    stream: &mut BufReader<T>,
-) -> Result<Frame, FrameError>
+fn process_non_aggregate<T>(id: FrameID, stream: &mut BufReader<T>) -> Result<Frame, FrameError>
 where
     T: Read,
 {
@@ -303,11 +357,11 @@ where
         Err(e) if e.kind() == ErrorKind::ConnectionReset => {
             warn!("connection  reset by peer: {}", e);
             Err(FrameError::ConnectionReset)
-        },
+        }
         Err(e) => {
             error!("error while reading from buffer: {}", e);
             Err(FrameError::IOError)
-        },
+        }
     }
 }
 
@@ -315,7 +369,7 @@ fn get_frame_id<T>(stream: &mut BufReader<T>) -> Result<FrameID, FrameError>
 where
     T: Read,
 {
-    let mut bytes = [0;1];
+    let mut bytes = [0; 1];
     match stream.read(&mut bytes) {
         Ok(0) => Err(FrameError::Eof),
         Ok(_) => match FrameID::from_u8(&bytes[0]) {
@@ -325,11 +379,11 @@ where
         Err(e) if e.kind() == ErrorKind::ConnectionReset => {
             warn!("connection  reset by peer: {}", e);
             Err(FrameError::ConnectionReset)
-        },
+        }
         Err(e) => {
             error!("error while reading from buffer: {}", e);
             Err(FrameError::IOError)
-        },
+        }
     }
 }
 
@@ -369,11 +423,11 @@ where
         Err(e) if e.kind() == ErrorKind::UnexpectedEof => {
             debug!("EOF seen before full decode: {}", e);
             Err(FrameError::ConnectionReset)
-        },
+        }
         Err(e) => {
             error!("error while reading from buffer: {}", e);
             Err(FrameError::IOError)
-        },
+        }
     }
 }
 
