@@ -58,7 +58,7 @@ impl Cmd {
     }
 
     /// parse_get tries to retrieve get args from a slice of frames
-    fn parse_get(frames: &[Frame]) -> io::Result<(Cmd)> {
+    fn parse_get(frames: &[Frame]) -> io::Result<Cmd> {
         if frames.len() != 1 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
