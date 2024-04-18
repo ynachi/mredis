@@ -1,4 +1,5 @@
-mod command;
+pub(crate) mod command;
 pub mod db;
-pub mod frame;
+pub(crate)mod frame;
+
 pub mod server;

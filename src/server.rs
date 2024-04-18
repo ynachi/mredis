@@ -111,6 +111,10 @@ async fn apply_command<T: AsyncWriteExt + Unpin>(command: &Command, state: &Arc<
             state.set_kv(key, value, *ttl);
             Frame::new_simple_string("OK".to_string())
         }
+        Command::Del(frames) => {
+            let num_deleted = state.del_entries(frames);
+            Frame::new_integer(num_deleted as i64)
+        }
         Command::Unknown(name) => Frame::new_bulk_error(format!("unknown command: {}", name)),
     };
     response_frame.write_flush_all(stream_writer).await.unwrap()
