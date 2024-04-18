@@ -7,6 +7,7 @@ pub enum Command {
     Ping(Option<String>),
     Set(String, String, Duration),
     Get(String),
+    Del(Vec<String>),
     Unknown(String),
 }
 
@@ -25,6 +26,7 @@ impl Command {
                 "PING" => Command::parse_ping(&frames[1..]),
                 "GET" => Command::parse_get(&frames[1..]),
                 "SET" => Command::parse_set(&frames[1..]),
+                "DEL" => Command::parse_del(&frames[1..]),
                 _ => Ok(Command::Unknown(name.to_string())),
             };
         }
@@ -94,6 +96,20 @@ impl Command {
         Ok(Command::Set(key, value, ttl))
     }
 
+    fn parse_del(frames: &[Frame]) -> Result<Command, FrameError> {
+        let len = frames.len();
+        if len == 0 {
+            return Err(FrameError::Syntax(
+                "DEL command takes at least one key".to_string(),
+            ));
+        }
+        let mut vec = Vec::with_capacity(len);
+        for i in 0..len {
+            vec.push(Self::get_string(frames, i)?);
+        }
+        Ok(Command::Del(vec))
+    }
+    
     fn get_u64(frames: &[Frame], index: usize) -> Result<u64, FrameError> {
         let content = Self::get_string(frames, index)?;
         let content = content.parse::<u64>().map_err(|_| FrameError::UTF8ToInt)?;

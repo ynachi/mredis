@@ -82,7 +82,7 @@ impl Debug for Storage {
 
 impl Storage {
     /// new creates a new storage. shard_count must be a power of two or the function panics.
-    pub fn new(capacity: usize, shard_count: usize) -> Self {
+    pub(crate) fn new(capacity: usize, shard_count: usize) -> Self {
         assert!(
             shard_count.is_power_of_two(),
             "shard_count must be a power of two"
@@ -108,7 +108,7 @@ impl Storage {
         &self.shards[shard_index]
     }
 
-    pub fn set_kv(&self, key: &str, value: &str, ttl: Duration) -> Option<String> {
+    pub(crate) fn set_kv(&self, key: &str, value: &str, ttl: Duration) -> Option<String> {
         let shard = self.get_shard(key);
         let mut shard = shard.lock().unwrap();
         // lazy eviction, remove the latest key if it has expired
@@ -118,7 +118,7 @@ impl Storage {
         shard.add_or_update_kv(key, value, Instant::now() + ttl)
     }
 
-    pub fn get_v(&self, key: &str) -> Option<String> {
+    pub(crate) fn get_v(&self, key: &str) -> Option<String> {
         let shard = self.get_shard(key);
         let shard = shard.lock().unwrap();
         let maybe_entry = shard.get_value_by_key(key);
@@ -126,19 +126,19 @@ impl Storage {
         // lazy eviction, remove the last key if it has expired
     }
 
-    pub fn size(&self) -> usize {
-        self.size.load(Ordering::Relaxed)
-    }
+    // fn size(&self) -> usize {
+    //     self.size.load(Ordering::Relaxed)
+    // }
 
     // Atomic operations are expensive. So we want to use them in group, not in single low-level
     // operations. This is why size is not updated here.
-    fn del_entry(&self, key: &str) -> usize {
-        let shard = self.get_shard(key);
-        let mut shard_lock = shard.lock().unwrap();
-        shard_lock.del_entry(key)
-    }
+    // fn del_entry(&self, key: &str) -> usize {
+    //     let shard = self.get_shard(key);
+    //     let mut shard_lock = shard.lock().unwrap();
+    //     shard_lock.del_entry(key)
+    // }
 
-    pub fn del_entries(&self, keys: &Vec<String>) -> usize {
+    pub(crate) fn del_entries(&self, keys: &Vec<String>) -> usize {
         let mut count = 0;
         for key in keys {
             let shard = self.get_shard(key);

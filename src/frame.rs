@@ -12,7 +12,7 @@ use std::fmt::{self, Debug, Display, Formatter};
 use tokio::io::{
     self, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, ErrorKind,
 };
-use tracing::error;
+use tracing::{error, warn};
 
 const CR: u8 = b'\r';
 const LF: u8 = b'\n';
@@ -22,7 +22,7 @@ const LF: u8 = b'\n';
 ///  up front, but we have changed our mind.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
-pub enum FrameID {
+enum FrameID {
     Integer = 58, // ':'
     // @TODO: remove for now
     // Double = 44,       // ','
@@ -43,23 +43,23 @@ pub enum FrameID {
 }
 
 impl FrameID {
-    fn as_u8(&self) -> u8 {
-        match self {
-            FrameID::Integer => 58,
-            // FrameID::Double => 44,
-            FrameID::SimpleString => 43,
-            FrameID::SimpleError => 45,
-            FrameID::BulkString => 36,
-            FrameID::BulkError => 33,
-            FrameID::Boolean => 35,
-            FrameID::Null => 95,
-            FrameID::BigNumber => 40,
-            FrameID::Array => 42,
-            // FrameID::Map => 37,
-            // FrameID::Set => 126,
-            // FrameID::Push => 62,
-        }
-    }
+    // fn as_u8(&self) -> u8 {
+    //     match self {
+    //         FrameID::Integer => 58,
+    //         // FrameID::Double => 44,
+    //         FrameID::SimpleString => 43,
+    //         FrameID::SimpleError => 45,
+    //         FrameID::BulkString => 36,
+    //         FrameID::BulkError => 33,
+    //         FrameID::Boolean => 35,
+    //         FrameID::Null => 95,
+    //         FrameID::BigNumber => 40,
+    //         FrameID::Array => 42,
+    //         // FrameID::Map => 37,
+    //         // FrameID::Set => 126,
+    //         // FrameID::Push => 62,
+    //     }
+    // }
 
     fn from_u8(from: &u8) -> Option<FrameID> {
         match from {
@@ -131,24 +131,24 @@ pub struct Frame {
 }
 
 impl Frame {
-    pub fn get_id(&self) -> FrameID {
-        self.frame_type
-    }
+    // fn get_id(&self) -> FrameID {
+    //     self.frame_type
+    // }
 
-    pub fn get_array(&self) -> Option<&Vec<Frame>> {
+    pub(crate) fn get_array(&self) -> Option<&Vec<Frame>> {
         if self.frame_type != FrameID::Array {
             return None;
         }
         self.frame_data.get_nested()
     }
-    pub fn get_bulk(&self) -> Option<(usize, &String)> {
+    pub(crate) fn get_bulk(&self) -> Option<(usize, &String)> {
         match &self.frame_data {
             FrameData::Bulk(size, data) => Some((*size, data)),
             _ => None,
         }
     }
 
-    pub async fn write_flush_all<T>(&self, stream: &mut BufWriter<T>) -> io::Result<()>
+    pub(crate) async fn write_flush_all<T>(&self, stream: &mut BufWriter<T>) -> io::Result<()>
     where
         T: AsyncWriteExt + Unpin,
     {
@@ -156,36 +156,43 @@ impl Frame {
         stream.flush().await
     }
 
-    pub fn new_bulk_error(inner: String) -> Frame {
+    pub(crate) fn new_bulk_error(inner: String) -> Frame {
         Frame {
             frame_type: FrameID::BulkError,
             frame_data: FrameData::Bulk(inner.len(), inner),
         }
     }
 
-    pub fn new_simple_string(inner: String) -> Frame {
+    pub(crate) fn new_simple_string(inner: String) -> Frame {
         Frame {
             frame_type: FrameID::SimpleString,
             frame_data: FrameData::Simple(inner),
         }
     }
 
-    pub fn new_bulk_string(inner: String) -> Frame {
+    pub(crate) fn new_bulk_string(inner: String) -> Frame {
         Frame {
             frame_type: FrameID::BulkString,
             frame_data: FrameData::Bulk(inner.len(), inner),
         }
     }
 
-    pub fn new_null() -> Frame {
+    pub(crate) fn new_null() -> Frame {
         Frame {
             frame_type: FrameID::Null,
             frame_data: FrameData::Null,
         }
     }
+
+    pub(crate) fn new_integer(inner: i64) -> Frame {
+        Frame {
+            frame_type: FrameID::Integer,
+            frame_data: FrameData::Integer(inner),
+        }
+    }
 }
 
-impl fmt::Display for Frame {
+impl Display for Frame {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self.frame_type {
             FrameID::Integer => {
@@ -240,7 +247,7 @@ fn validate_bool(data: &str) -> Result<bool, FrameError> {
     }
 }
 
-pub async fn decode<T>(stream: &mut BufReader<T>) -> Result<Frame, FrameError>
+pub(crate) async fn decode<T>(stream: &mut BufReader<T>) -> Result<Frame, FrameError>
 where
     T: AsyncReadExt + Unpin,
 {
@@ -519,7 +526,10 @@ where
         // The caller will treat EOF differently, so it needs to be returned explicitly
         Err(e) if e.kind() == ErrorKind::UnexpectedEof => Err(FrameError::Eof),
         // @TODO log e later
-        Err(e) => Err(FrameError::IOError),
+        Err(err) => {
+            warn!("IO error occurred: {}", err.to_string());
+            Err(FrameError::IOError)
+        },
     }
 }
 
