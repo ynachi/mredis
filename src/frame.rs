@@ -8,9 +8,11 @@
 //! simple frames are valid at their creation. We do that because we want to pay the cost of checking
 //! this property only if needed as it is expensive.
 
-use crate::frame::FrameData::Nested;
-use tokio::io::ErrorKind;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, BufReader};
+use std::fmt::{self, Debug, Display, Formatter};
+use tokio::io::{
+    self, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, ErrorKind,
+};
+use tracing::error;
 
 const CR: u8 = b'\r';
 const LF: u8 = b'\n';
@@ -20,7 +22,7 @@ const LF: u8 = b'\n';
 ///  up front, but we have changed our mind.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
-pub(crate) enum FrameID {
+pub enum FrameID {
     Integer = 58, // ':'
     // @TODO: remove for now
     // Double = 44,       // ','
@@ -89,21 +91,156 @@ enum FrameData {
     Nested(Vec<Frame>),
 }
 
+impl FrameData {
+    fn get_integer(&self) -> Option<i64> {
+        match self {
+            FrameData::Integer(value) => Some(*value),
+            _ => None,
+        }
+    }
+    fn get_string(&self) -> Option<&String> {
+        match self {
+            FrameData::Simple(value) => Some(value),
+            _ => None,
+        }
+    }
+    fn get_bulk(&self) -> Option<(usize, &String)> {
+        match self {
+            FrameData::Bulk(size, data) => Some((*size, data)),
+            _ => None,
+        }
+    }
+    fn get_boolean(&self) -> Option<bool> {
+        match self {
+            FrameData::Boolean(value) => Some(*value),
+            _ => None,
+        }
+    }
+    pub fn get_nested(&self) -> Option<&Vec<Frame>> {
+        match self {
+            FrameData::Nested(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Eq, PartialEq)]
-struct Frame {
+pub struct Frame {
     frame_type: FrameID,
     frame_data: FrameData,
 }
 
-fn validate_bool(data: String) -> Result<bool, FrameError> {
-    match data.as_str() {
+impl Frame {
+    pub fn get_id(&self) -> FrameID {
+        self.frame_type
+    }
+
+    pub fn get_array(&self) -> Option<&Vec<Frame>> {
+        if self.frame_type != FrameID::Array {
+            return None;
+        }
+        self.frame_data.get_nested()
+    }
+    pub fn get_bulk(&self) -> Option<(usize, &String)> {
+        match &self.frame_data {
+            FrameData::Bulk(size, data) => Some((*size, data)),
+            _ => None,
+        }
+    }
+
+    pub async fn write_flush_all<T>(&self, stream: &mut BufWriter<T>) -> io::Result<()>
+    where
+        T: AsyncWriteExt + Unpin,
+    {
+        stream.write_all(self.to_string().as_bytes()).await?;
+        stream.flush().await
+    }
+
+    pub fn new_bulk_error(inner: String) -> Frame {
+        Frame {
+            frame_type: FrameID::BulkError,
+            frame_data: FrameData::Bulk(inner.len(), inner),
+        }
+    }
+
+    pub fn new_simple_string(inner: String) -> Frame {
+        Frame {
+            frame_type: FrameID::SimpleString,
+            frame_data: FrameData::Simple(inner),
+        }
+    }
+
+    pub fn new_bulk_string(inner: String) -> Frame {
+        Frame {
+            frame_type: FrameID::BulkString,
+            frame_data: FrameData::Bulk(inner.len(), inner),
+        }
+    }
+
+    pub fn new_null() -> Frame {
+        Frame {
+            frame_type: FrameID::Null,
+            frame_data: FrameData::Null,
+        }
+    }
+}
+
+impl fmt::Display for Frame {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self.frame_type {
+            FrameID::Integer => {
+                let value = self.frame_data.get_integer().ok_or(fmt::Error)?;
+                write!(f, ":{}\r\n", value)
+            }
+            FrameID::SimpleString => {
+                let value = self.frame_data.get_string().ok_or(fmt::Error)?;
+                write!(f, "+{}\r\n", value)
+            }
+            FrameID::SimpleError => {
+                let value = self.frame_data.get_string().ok_or(fmt::Error)?;
+                write!(f, "-{}\r\n", value)
+            }
+            FrameID::BulkString => {
+                let (len, value) = self.get_bulk().ok_or(fmt::Error)?;
+                write!(f, "${}\r\n{}\r\n", len, value)
+            }
+            FrameID::BulkError => {
+                let (len, value) = self.frame_data.get_bulk().ok_or(fmt::Error)?;
+                write!(f, "!{}\r\n{}\r\n", len, value)
+            }
+            FrameID::Boolean => {
+                let value = self.frame_data.get_boolean().ok_or(fmt::Error)?;
+                let value = if value { "t" } else { "f" };
+                write!(f, "#{}\r\n", value)
+            }
+            FrameID::Null => {
+                write!(f, "_\r\n")
+            }
+            FrameID::BigNumber => {
+                let value = self.frame_data.get_string().ok_or(fmt::Error)?;
+                write!(f, "({}\r\n", value)
+            }
+            FrameID::Array => {
+                let frames = self.frame_data.get_nested().ok_or(fmt::Error)?;
+                write!(f, "*{}\r\n", frames.len())?;
+                for v in frames {
+                    write!(f, "{}", v)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn validate_bool(data: &str) -> Result<bool, FrameError> {
+    match data {
         "t" => Ok(true),
         "f" => Ok(false),
         _ => Err(FrameError::Invalid),
     }
 }
 
-async fn decode<T>(stream: &mut BufReader<T>) -> Result<Frame, FrameError>
+pub async fn decode<T>(stream: &mut BufReader<T>) -> Result<Frame, FrameError>
 where
     T: AsyncReadExt + Unpin,
 {
@@ -122,7 +259,7 @@ where
             let frame_vec = process_aggregate_frames(id, stream).await?;
             Ok(Frame {
                 frame_type: FrameID::Array,
-                frame_data: Nested(frame_vec),
+                frame_data: FrameData::Nested(frame_vec),
             })
         }
     }
@@ -138,7 +275,7 @@ where
     let data = read_simple_string(stream).await?;
     match id {
         FrameID::Boolean => {
-            let bool = validate_bool(data)?;
+            let bool = validate_bool(&data)?;
             Ok(Frame {
                 frame_type: id,
                 frame_data: FrameData::Boolean(bool),
@@ -189,7 +326,9 @@ where
     T: AsyncReadExt + Unpin,
 {
     match id {
-        FrameID::Array => Err(FrameError::Syntax),
+        FrameID::Array => Err(FrameError::Syntax(
+            "received aggregate frame in non aggregate decoding".to_string(),
+        )),
         FrameID::BulkString | FrameID::BulkError => process_bulk_frames(id, stream).await,
         _ => process_simple_frames(id, stream).await,
     }
@@ -249,7 +388,7 @@ where
                         // to build the right aggregate.
                         frames.push(Frame {
                             frame_type: *id,
-                            frame_data: Nested(last_vec_of_frames),
+                            frame_data: FrameData::Nested(last_vec_of_frames),
                         });
                         *count -= 1;
                         if *count != 0 {
@@ -269,9 +408,9 @@ pub enum FrameError {
     // Frame is not correctly formatted
     Invalid,
     // Empty buffer should not be passed to get frame from, so this is an error.
-    EmptyBuffer,
+    // EmptyBuffer,
     // reached expected EOF
-    EOF,
+    Eof,
     // Connection unexpectedly reset
     ConnectionReset,
     // Unidentified IO error
@@ -281,7 +420,23 @@ pub enum FrameError {
     // Unknown frame type
     Unknown,
     // This is a programming error. It should not happen.
-    Syntax,
+    Syntax(String),
+}
+
+impl Display for FrameError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            FrameError::Incomplete => write!(f, "not enough data to decode a full frame"),
+            FrameError::Invalid => write!(f, "frame is not correctly formatted"),
+            FrameError::Eof => write!(f, "seen EOF, this is generally a graceful disconnection"),
+            FrameError::ConnectionReset => write!(f, "unexpected connection reset"),
+            // this error should not happen in practice
+            FrameError::IOError => write!(f, "unexpected IO error"),
+            FrameError::UTF8ToInt => write!(f, "utf8 to int decoding error"),
+            FrameError::Unknown => write!(f, "unable to identify the frame type"),
+            FrameError::Syntax(message) => write!(f, "{}", message),
+        }
+    }
 }
 
 /// `read_simple_string` gets a simple string from the network. As a reminder, such string does
@@ -295,7 +450,7 @@ where
 {
     let mut buf = Vec::new();
     match stream.read_until(LF, &mut buf).await {
-        Ok(0) => Err(FrameError::EOF),
+        Ok(0) => Err(FrameError::Eof),
         Ok(size) => {
             if size < 2 {
                 return Err(FrameError::Incomplete);
@@ -308,8 +463,10 @@ where
             Ok(String::from_utf8_lossy(&buf[0..size - 2]).to_string())
         }
         Err(e) if e.kind() == ErrorKind::ConnectionReset => Err(FrameError::ConnectionReset),
-        // @TODO log e later
-        Err(e) => Err(FrameError::IOError),
+        Err(e) => {
+            error!("unexpected io error: {}", e);
+            Err(FrameError::IOError)
+        }
     }
 }
 
@@ -322,7 +479,7 @@ where
             Some(id) => Ok(id),
             None => Err(FrameError::Unknown),
         },
-        Err(e) if e.kind() == ErrorKind::UnexpectedEof => Err(FrameError::EOF),
+        Err(e) if e.kind() == ErrorKind::UnexpectedEof => Err(FrameError::Eof),
         // @TODO log e later
         Err(e) => Err(FrameError::IOError),
     }
@@ -360,7 +517,7 @@ where
             ))
         }
         // The caller will treat EOF differently, so it needs to be returned explicitly
-        Err(e) if e.kind() == ErrorKind::UnexpectedEof => Err(FrameError::EOF),
+        Err(e) if e.kind() == ErrorKind::UnexpectedEof => Err(FrameError::Eof),
         // @TODO log e later
         Err(e) => Err(FrameError::IOError),
     }
@@ -369,6 +526,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
     #[tokio::test]
     async fn decode_test() {
         //
@@ -394,7 +552,7 @@ mod tests {
         let frame = decode(&mut stream).await;
         assert_eq!(
             frame,
-            Err(FrameError::EOF),
+            Err(FrameError::Eof),
             "should return EOF error variant"
         );
 
@@ -441,7 +599,7 @@ mod tests {
         let mut stream = BufReader::new("*3\r\n:1\r\n+Two\r\n$5\r\nThree\r\n".as_bytes());
         let frame = decode(&mut stream).await.unwrap();
         assert_eq!(frame.frame_type, FrameID::Array);
-        let frame_data = Nested(vec![
+        let frame_data = FrameData::Nested(vec![
             Frame {
                 frame_type: FrameID::Integer,
                 frame_data: FrameData::Integer(1),
@@ -461,7 +619,7 @@ mod tests {
         let mut stream = BufReader::new("*2\r\n:1\r\n*1\r\n+Three\r\n".as_bytes());
         let frame = decode(&mut stream).await.unwrap();
         assert_eq!(frame.frame_type, FrameID::Array);
-        let frame_data = Nested(vec![
+        let frame_data = FrameData::Nested(vec![
             Frame {
                 frame_type: FrameID::Integer,
                 frame_data: FrameData::Integer(1),
@@ -480,7 +638,7 @@ mod tests {
         let mut stream = BufReader::new("*3\r\n:1\r\n*1\r\n+Three\r\n-Err\r\n".as_bytes());
         let frame = decode(&mut stream).await.unwrap();
         assert_eq!(frame.frame_type, FrameID::Array);
-        let frame_data = Nested(vec![
+        let frame_data = FrameData::Nested(vec![
             Frame {
                 frame_type: FrameID::Integer,
                 frame_data: FrameData::Integer(1),

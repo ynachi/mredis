@@ -3,13 +3,13 @@
 //! We do not store the state for eviction. Time-based eviction is used and we perform lazy eviction.
 //! If an expired key is read, this key is deleted and no value is returned to the user.
 //! ...
-use std::collections::{BinaryHeap};
+use rustc_hash::FxHashMap;
+use std::collections::BinaryHeap;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use rustc_hash::FxHashMap;
 
 struct Shard {
     storage: FxHashMap<String, String>,
@@ -42,7 +42,7 @@ impl Shard {
             0
         }
     }
-    
+
     fn latest_is_expired(&self) -> bool {
         if let Some((instant, _)) = self.eviction_state.peek() {
             if Instant::now() > *instant {
@@ -51,7 +51,7 @@ impl Shard {
         }
         false
     }
-    
+
     fn del_latest(&mut self) {
         if let Some((_, key)) = self.eviction_state.pop() {
             self.storage.remove(&key);
@@ -149,7 +149,6 @@ impl Storage {
         count
     }
 }
-
 
 #[cfg(test)]
 mod tests {
