@@ -3,10 +3,6 @@
 //!
 //! 1. Not all frame types will be implemented in the beginning. We first implement those we know
 //! we will be using for sure. The rest will be implemented when the need appears.
-//! 2. Quick note about simple frames. Simple frames should not contain any CR or LF in the middle.
-//! Vut this check will not be made during the decoding of frames. Instead, we will make sure that
-//! simple frames are valid at their creation. We do that because we want to pay the cost of checking
-//! this property only if needed as it is expensive.
 
 use std::fmt::{self, Debug, Display, Formatter};
 use tokio::io::{
@@ -14,15 +10,12 @@ use tokio::io::{
 };
 use tracing::{error, warn};
 
-const CR: u8 = b'\r';
-const LF: u8 = b'\n';
-
 /// `FrameID` is used to mark the beginning of a frame type. We have decided to implement only what
 /// is needed as we go. This is why there are some commented types. We wanted to implement them all
 ///  up front, but we have changed our mind.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 #[repr(u8)]
-enum FrameID {
+pub enum FrameID {
     Integer = 58, // ':'
     // @TODO: remove for now
     // Double = 44,       // ','
@@ -43,23 +36,6 @@ enum FrameID {
 }
 
 impl FrameID {
-    // fn as_u8(&self) -> u8 {
-    //     match self {
-    //         FrameID::Integer => 58,
-    //         // FrameID::Double => 44,
-    //         FrameID::SimpleString => 43,
-    //         FrameID::SimpleError => 45,
-    //         FrameID::BulkString => 36,
-    //         FrameID::BulkError => 33,
-    //         FrameID::Boolean => 35,
-    //         FrameID::Null => 95,
-    //         FrameID::BigNumber => 40,
-    //         FrameID::Array => 42,
-    //         // FrameID::Map => 37,
-    //         // FrameID::Set => 126,
-    //         // FrameID::Push => 62,
-    //     }
-    // }
 
     fn from_u8(from: &u8) -> Option<FrameID> {
         match from {
@@ -135,20 +111,20 @@ impl Frame {
     //     self.frame_type
     // }
 
-    pub(crate) fn get_array(&self) -> Option<&Vec<Frame>> {
+    pub fn get_array(&self) -> Option<&Vec<Frame>> {
         if self.frame_type != FrameID::Array {
             return None;
         }
         self.frame_data.get_nested()
     }
-    pub(crate) fn get_bulk(&self) -> Option<(usize, &String)> {
+    pub fn get_bulk(&self) -> Option<(usize, &String)> {
         match &self.frame_data {
             FrameData::Bulk(size, data) => Some((*size, data)),
             _ => None,
         }
     }
 
-    pub(crate) async fn write_flush_all<T>(&self, stream: &mut BufWriter<T>) -> io::Result<()>
+    pub async fn write_flush_all<T>(&self, stream: &mut BufWriter<T>) -> io::Result<()>
     where
         T: AsyncWriteExt + Unpin,
     {
@@ -156,35 +132,35 @@ impl Frame {
         stream.flush().await
     }
 
-    pub(crate) fn new_bulk_error(inner: String) -> Frame {
+    pub fn new_bulk_error(inner: String) -> Frame {
         Frame {
             frame_type: FrameID::BulkError,
             frame_data: FrameData::Bulk(inner.len(), inner),
         }
     }
 
-    pub(crate) fn new_simple_string(inner: String) -> Frame {
+    pub fn new_simple_string(inner: String) -> Frame {
         Frame {
             frame_type: FrameID::SimpleString,
             frame_data: FrameData::Simple(inner),
         }
     }
 
-    pub(crate) fn new_bulk_string(inner: String) -> Frame {
+    pub fn new_bulk_string(inner: String) -> Frame {
         Frame {
             frame_type: FrameID::BulkString,
             frame_data: FrameData::Bulk(inner.len(), inner),
         }
     }
 
-    pub(crate) fn new_null() -> Frame {
+    pub fn new_null() -> Frame {
         Frame {
             frame_type: FrameID::Null,
             frame_data: FrameData::Null,
         }
     }
 
-    pub(crate) fn new_integer(inner: i64) -> Frame {
+    pub fn new_integer(inner: i64) -> Frame {
         Frame {
             frame_type: FrameID::Integer,
             frame_data: FrameData::Integer(inner),
@@ -239,7 +215,7 @@ impl Display for Frame {
     }
 }
 
-fn validate_bool(data: &str) -> Result<bool, FrameError> {
+pub fn validate_bool(data: &str) -> Result<bool, FrameError> {
     match data {
         "t" => Ok(true),
         "f" => Ok(false),
@@ -247,7 +223,7 @@ fn validate_bool(data: &str) -> Result<bool, FrameError> {
     }
 }
 
-pub(crate) async fn decode<T>(stream: &mut BufReader<T>) -> Result<Frame, FrameError>
+pub async fn decode<T>(stream: &mut BufReader<T>) -> Result<Frame, FrameError>
 where
     T: AsyncReadExt + Unpin,
 {
@@ -272,7 +248,7 @@ where
     }
 }
 
-async fn process_simple_frames<T>(
+pub async fn process_simple_frames<T>(
     id: FrameID,
     stream: &mut BufReader<T>,
 ) -> Result<Frame, FrameError>
@@ -312,7 +288,7 @@ where
     }
 }
 
-async fn process_bulk_frames<T>(id: FrameID, stream: &mut BufReader<T>) -> Result<Frame, FrameError>
+pub async fn process_bulk_frames<T>(id: FrameID, stream: &mut BufReader<T>) -> Result<Frame, FrameError>
 where
     T: AsyncReadExt + Unpin,
 {
@@ -325,7 +301,7 @@ where
 
 /// process_non_aggregate is a helper to decode non-aggregate frames. It calls the appropriate
 /// processing method depending on the frame type. It should not receive an aggregate type.
-async fn process_non_aggregate<T>(
+pub async fn process_non_aggregate<T>(
     id: FrameID,
     stream: &mut BufReader<T>,
 ) -> Result<Frame, FrameError>
@@ -345,7 +321,7 @@ where
 /// We have frame ID in the signature because aggregate can be of different types.
 /// So, we need to keep track of the IDs to construct the right aggregate frame when needed.
 /// This function can be used to decode Arrays, Maps, and Sets.
-async fn process_aggregate_frames<T>(
+pub async fn process_aggregate_frames<T>(
     id: FrameID,
     stream: &mut BufReader<T>,
 ) -> Result<Vec<Frame>, FrameError>
@@ -456,12 +432,12 @@ where
     T: AsyncReadExt + Unpin,
 {
     let mut buf = Vec::new();
-    match stream.read_until(LF, &mut buf).await {
+    match stream.read_until(b'\n', &mut buf).await {
         Ok(0) => Err(FrameError::Eof),
         Ok(size) => {
             if size < 2 {
                 return Err(FrameError::Incomplete);
-            } else if buf[size - 2] != CR {
+            } else if buf[size - 2] != b'\r' {
                 return Err(FrameError::Invalid);
             }
             // We should also check if there is any CR in the middle, but this check is made upfront.
@@ -488,7 +464,7 @@ where
         },
         Err(e) if e.kind() == ErrorKind::UnexpectedEof => Err(FrameError::Eof),
         // @TODO log e later
-        Err(e) => Err(FrameError::IOError),
+        Err(_e) => Err(FrameError::IOError),
     }
 }
 
@@ -515,7 +491,7 @@ where
     match stream.read_exact(&mut buf).await {
         Ok(size) => {
             // we need to read exact size bytes
-            if size != len || size < 2 || buf[size - 2] != CR {
+            if size != len || size < 2 || buf[size - 2] != b'\r' {
                 return Err(FrameError::Invalid);
             }
             Ok((
