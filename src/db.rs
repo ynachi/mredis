@@ -82,7 +82,7 @@ impl Debug for Storage {
 
 impl Storage {
     /// new creates a new storage. shard_count must be a power of two or the function panics.
-    pub(crate) fn new(capacity: usize, shard_count: usize) -> Self {
+    pub fn new(capacity: usize, shard_count: usize) -> Self {
         assert!(
             shard_count.is_power_of_two(),
             "shard_count must be a power of two"
@@ -108,7 +108,7 @@ impl Storage {
         &self.shards[shard_index]
     }
 
-    pub(crate) fn set_kv(&self, key: &str, value: &str, ttl: Duration) -> Option<String> {
+    pub fn set_kv(&self, key: &str, value: &str, ttl: Duration) -> Option<String> {
         let shard = self.get_shard(key);
         let mut shard = shard.lock().unwrap();
         // lazy eviction, remove the latest key if it has expired
@@ -118,7 +118,7 @@ impl Storage {
         shard.add_or_update_kv(key, value, Instant::now() + ttl)
     }
 
-    pub(crate) fn get_v(&self, key: &str) -> Option<String> {
+    pub fn get_v(&self, key: &str) -> Option<String> {
         let shard = self.get_shard(key);
         let shard = shard.lock().unwrap();
         let maybe_entry = shard.get_value_by_key(key);

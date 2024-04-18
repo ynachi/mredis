@@ -1,7 +1,5 @@
 use mredis::server::{Config, Server};
 
-mod frame;
-
 #[tokio::main]
 pub async fn main() -> std::io::Result<()> {
     // console_subscriber::init();
