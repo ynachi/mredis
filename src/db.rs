@@ -8,7 +8,7 @@ use std::collections::BinaryHeap;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, RwLock};
 use std::time::{Duration, Instant};
 
 struct Shard {
@@ -65,7 +65,7 @@ pub struct Storage {
     capacity: usize,
     // shard_count should be a power of two.
     shard_count: usize,
-    shards: Vec<Arc<Mutex<Shard>>>,
+    shards: Vec<Arc<RwLock<Shard>>>,
     // we don't want to lock a mutex to get the size as it is a frequent operation.
     size: AtomicUsize,
 }
@@ -90,7 +90,7 @@ impl Storage {
         // Assuming shards are equally distributed
         let mut shards = Vec::with_capacity(shard_count);
         for _ in 0..shard_count {
-            let shard = Arc::new(Mutex::new(Shard::new()));
+            let shard = Arc::new(RwLock::new(Shard::new()));
             shards.push(shard);
         }
         Storage {
@@ -100,7 +100,7 @@ impl Storage {
             size: Default::default(),
         }
     }
-    fn get_shard(&self, key: &str) -> &Arc<Mutex<Shard>> {
+    fn get_shard(&self, key: &str) -> &Arc<RwLock<Shard>> {
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         key.hash(&mut hasher);
         let hash = hasher.finish();
@@ -110,7 +110,7 @@ impl Storage {
 
     pub fn set_kv(&self, key: &str, value: &str, ttl: Duration) -> Option<String> {
         let shard = self.get_shard(key);
-        let mut shard = shard.lock().unwrap();
+        let mut shard = shard.write().unwrap();
         // lazy eviction, remove the latest key if it has expired
         if shard.latest_is_expired() {
             shard.del_latest();
@@ -120,7 +120,7 @@ impl Storage {
 
     pub fn get_v(&self, key: &str) -> Option<String> {
         let shard = self.get_shard(key);
-        let shard = shard.lock().unwrap();
+        let shard = shard.read().unwrap();
         let maybe_entry = shard.get_value_by_key(key);
         maybe_entry.cloned()
         // lazy eviction, remove the last key if it has expired
@@ -130,19 +130,11 @@ impl Storage {
     //     self.size.load(Ordering::Relaxed)
     // }
 
-    // Atomic operations are expensive. So we want to use them in group, not in single low-level
-    // operations. This is why size is not updated here.
-    // fn del_entry(&self, key: &str) -> usize {
-    //     let shard = self.get_shard(key);
-    //     let mut shard_lock = shard.lock().unwrap();
-    //     shard_lock.del_entry(key)
-    // }
-
     pub(crate) fn del_entries(&self, keys: &Vec<String>) -> usize {
         let mut count = 0;
         for key in keys {
             let shard = self.get_shard(key);
-            let mut bucket = shard.lock().unwrap();
+            let mut bucket = shard.write().unwrap();
             count += bucket.del_entry(key);
         }
         self.size.fetch_sub(count, Ordering::Relaxed);

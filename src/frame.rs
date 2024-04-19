@@ -5,10 +5,10 @@
 //! we will be using for sure. The rest will be implemented when the need appears.
 
 use std::fmt::{self, Debug, Display, Formatter};
+
 use tokio::io::{
     self, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, BufWriter, ErrorKind,
 };
-use tracing::{error, warn};
 
 /// `FrameID` is used to mark the beginning of a frame type. We have decided to implement only what
 /// is needed as we go. This is why there are some commented types. We wanted to implement them all
@@ -36,7 +36,6 @@ pub enum FrameID {
 }
 
 impl FrameID {
-
     fn from_u8(from: &u8) -> Option<FrameID> {
         match from {
             58 => Some(FrameID::Integer),
@@ -166,6 +165,13 @@ impl Frame {
             frame_data: FrameData::Integer(inner),
         }
     }
+
+    pub fn new_simple_error(inner: String) -> Frame {
+        Frame {
+            frame_type: FrameID::SimpleError,
+            frame_data: FrameData::Simple(inner),
+        }
+    }
 }
 
 impl Display for Frame {
@@ -288,7 +294,10 @@ where
     }
 }
 
-pub async fn process_bulk_frames<T>(id: FrameID, stream: &mut BufReader<T>) -> Result<Frame, FrameError>
+pub async fn process_bulk_frames<T>(
+    id: FrameID,
+    stream: &mut BufReader<T>,
+) -> Result<Frame, FrameError>
 where
     T: AsyncReadExt + Unpin,
 {
@@ -422,6 +431,17 @@ impl Display for FrameError {
     }
 }
 
+// Convert io::Error to FrameError::Encoding
+impl From<io::Error> for FrameError {
+    fn from(err: io::Error) -> Self {
+        match err.kind() {
+            ErrorKind::UnexpectedEof => FrameError::Eof,
+            ErrorKind::ConnectionReset => FrameError::ConnectionReset,
+            _ => FrameError::IOError,
+        }
+    }
+}
+
 /// `read_simple_string` gets a simple string from the network. As a reminder, such string does
 /// not contain any CR or LF char in the middle. This method assumes the frame identifier has
 /// already been taken from the stream. So, for instance, consider you have something like
@@ -432,9 +452,10 @@ where
     T: AsyncReadExt + Unpin,
 {
     let mut buf = Vec::new();
-    match stream.read_until(b'\n', &mut buf).await {
-        Ok(0) => Err(FrameError::Eof),
-        Ok(size) => {
+    let size = stream.read_until(b'\n', &mut buf).await?;
+    match size {
+        0 => Err(FrameError::Eof),
+        _ => {
             if size < 2 {
                 return Err(FrameError::Incomplete);
             } else if buf[size - 2] != b'\r' {
@@ -445,11 +466,6 @@ where
             // is used in places that naturally check the correctness of the frame content (for instance, conversion to int).
             Ok(String::from_utf8_lossy(&buf[0..size - 2]).to_string())
         }
-        Err(e) if e.kind() == ErrorKind::ConnectionReset => Err(FrameError::ConnectionReset),
-        Err(e) => {
-            error!("unexpected io error: {}", e);
-            Err(FrameError::IOError)
-        }
     }
 }
 
@@ -457,14 +473,10 @@ async fn get_frame_id<T>(stream: &mut BufReader<T>) -> Result<FrameID, FrameErro
 where
     T: AsyncReadExt + Unpin,
 {
-    match stream.read_u8().await {
-        Ok(id) => match FrameID::from_u8(&id) {
-            Some(id) => Ok(id),
-            None => Err(FrameError::Unknown),
-        },
-        Err(e) if e.kind() == ErrorKind::UnexpectedEof => Err(FrameError::Eof),
-        // @TODO log e later
-        Err(_e) => Err(FrameError::IOError),
+    let id = stream.read_u8().await?;
+    match FrameID::from_u8(&id) {
+        Some(id) => Ok(id),
+        None => Err(FrameError::Unknown),
     }
 }
 
@@ -488,25 +500,15 @@ where
     let len = len as usize + 2;
 
     let mut buf = vec![0; len];
-    match stream.read_exact(&mut buf).await {
-        Ok(size) => {
-            // we need to read exact size bytes
-            if size != len || size < 2 || buf[size - 2] != b'\r' {
-                return Err(FrameError::Invalid);
-            }
-            Ok((
-                size - 2,
-                String::from_utf8_lossy(&buf[0..len - 2]).to_string(),
-            ))
-        }
-        // The caller will treat EOF differently, so it needs to be returned explicitly
-        Err(e) if e.kind() == ErrorKind::UnexpectedEof => Err(FrameError::Eof),
-        // @TODO log e later
-        Err(err) => {
-            warn!("IO error occurred: {}", err.to_string());
-            Err(FrameError::IOError)
-        },
+    let size = stream.read_exact(&mut buf).await?;
+    // we need to read exact size bytes
+    if size != len || size < 2 || buf[size - 2] != b'\r' {
+        return Err(FrameError::Invalid);
     }
+    Ok((
+        size - 2,
+        String::from_utf8_lossy(&buf[0..len - 2]).to_string(),
+    ))
 }
 
 #[cfg(test)]

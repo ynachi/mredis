@@ -20,17 +20,17 @@ pub struct Config {
     /// Number of storage shards.
     #[clap(name = "shard", long, short, default_value = "8")]
     pub shard_count: usize,
-    
+
     /// Network read and write buffer size.
     #[clap(name = "buffer", long, short, default_value = "8192")]
     pub network_buffer_size: usize,
-    
+
     /// Max log level.
     #[clap(short, long, default_value_t, value_enum)]
-    pub verbosity: Verbosity
+    pub verbosity: Verbosity,
 }
 
-/// Verbosity logging verbosity 
+/// Verbosity logging verbosity
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug, Default)]
 pub enum Verbosity {
     /// Max level Error

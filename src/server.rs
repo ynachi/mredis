@@ -1,21 +1,21 @@
 use crate::command::Command;
+use crate::config::Config;
 use crate::db::Storage;
 use crate::frame::{decode, Frame, FrameError};
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{debug, error, info};
-use crate::config::Config;
+use tracing::{debug, error, info, warn};
 
 // @TODO: implement Tracing
 // @TODO: implement Metrics
-// @TODO: Implement CLI
 // @TODO: Implement graceful shutdown
+// @TODO: Implement Semaphore
 
 pub struct Server {
     storage: Arc<Storage>,
     tcp_listener: TcpListener,
-    net_buffer_size: usize
+    net_buffer_size: usize,
 }
 
 impl Server {
@@ -24,12 +24,12 @@ impl Server {
             .await
             .expect("failed to start TCP server");
         let storage = Arc::new(Storage::new(cfg.capacity, cfg.shard_count));
-        
+
         info!("Starting mredis server: {:?}", cfg);
         Server {
             storage,
             tcp_listener,
-            net_buffer_size: cfg.network_buffer_size
+            net_buffer_size: cfg.network_buffer_size,
         }
     }
 
@@ -43,7 +43,9 @@ impl Server {
 
                     let state = self.storage.clone();
 
-                    tokio::spawn(async move { Self::process_stream(&mut stream, state, net_buffer_size).await });
+                    tokio::spawn(async move {
+                        Self::process_stream(&mut stream, state, net_buffer_size).await
+                    });
                 }
                 Err(err) => {
                     debug!("error accepting client connection: {:?}", err);
@@ -88,8 +90,11 @@ where
     }
 }
 
-async fn apply_command<T: AsyncWriteExt + Unpin>(command: &Command, state: &Arc<Storage>, stream_writer: &mut BufWriter<T>)
-{
+async fn apply_command<T: AsyncWriteExt + Unpin>(
+    command: &Command,
+    state: &Arc<Storage>,
+    stream_writer: &mut BufWriter<T>,
+) {
     let response_frame = match command {
         Command::Ping(message) => {
             if let Some(message) = message {
@@ -113,16 +118,20 @@ async fn apply_command<T: AsyncWriteExt + Unpin>(command: &Command, state: &Arc<
             let num_deleted = state.del_entries(frames);
             Frame::new_integer(num_deleted as i64)
         }
-        Command::Unknown(name) => Frame::new_bulk_error(format!("unknown command: {}", name)),
+        Command::Unknown(name) => Frame::new_simple_error(format!("unknown command: {}", name)),
     };
-    response_frame.write_flush_all(stream_writer).await.unwrap()
+    if let Err(err) = response_frame.write_flush_all(stream_writer).await {
+        error!("failed to write to network: {}", err);
+    }
 }
 
 /// seen_eof filters FrameError because some errors need to be sent back to the client via
 /// the network, for instance, syntax errors. In this case, send the error to the client. If EOF
 /// return true to the caller. And, only log over error variants.
-async fn seen_eof<T: AsyncWriteExt + Unpin>(err: &FrameError, stream_writer: &mut BufWriter<T>) -> bool
-{
+async fn seen_eof<T: AsyncWriteExt + Unpin>(
+    err: &FrameError,
+    stream_writer: &mut BufWriter<T>,
+) -> bool {
     match err {
         FrameError::Eof => true,
         FrameError::Incomplete
@@ -131,6 +140,10 @@ async fn seen_eof<T: AsyncWriteExt + Unpin>(err: &FrameError, stream_writer: &mu
         | FrameError::UTF8ToInt
         | FrameError::Syntax(_) => {
             send_error(err, stream_writer).await;
+            false
+        }
+        FrameError::ConnectionReset => {
+            warn!("connection reset by peer");
             false
         }
         _ => {
@@ -142,9 +155,8 @@ async fn seen_eof<T: AsyncWriteExt + Unpin>(err: &FrameError, stream_writer: &mu
 
 /// send_error is a wrapper to send errors to the client over the network.
 /// These are mostly syntax errors.
-async fn send_error<T: AsyncWriteExt + Unpin>(err: &FrameError, stream: &mut BufWriter<T>)
-{
-    let err_frame = Frame::new_bulk_error(err.to_string());
+async fn send_error<T: AsyncWriteExt + Unpin>(err: &FrameError, stream: &mut BufWriter<T>) {
+    let err_frame = Frame::new_simple_error(err.to_string());
     if let Err(err) = err_frame.write_flush_all(stream).await {
         error!("failed to write to network: {}", err);
     }
