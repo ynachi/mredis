@@ -109,7 +109,7 @@ impl Command {
         }
         Ok(Command::Del(vec))
     }
-    
+
     fn get_u64(frames: &[Frame], index: usize) -> Result<u64, FrameError> {
         let content = Self::get_string(frames, index)?;
         let content = content.parse::<u64>().map_err(|_| FrameError::UTF8ToInt)?;

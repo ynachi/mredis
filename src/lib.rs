@@ -9,4 +9,5 @@ pub mod command;
 pub mod db;
 pub mod frame;
 
+pub mod config;
 pub mod server;
