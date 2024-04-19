@@ -11,11 +11,18 @@ pub struct Config {
     pub port: u16,
     pub capacity: usize,
     pub shard_count: usize,
+    pub network_buffer_size: usize
 }
+
+// @TODO: implement Tracing
+// @TODO: implement Metrics
+// @TODO: Implement CLI
+// @TODO: Implement graceful shutdown
 
 pub struct Server {
     storage: Arc<Storage>,
     tcp_listener: TcpListener,
+    net_buffer_size: usize
 }
 
 impl Server {
@@ -28,19 +35,21 @@ impl Server {
         Server {
             storage,
             tcp_listener,
+            net_buffer_size: cfg.network_buffer_size
         }
     }
 
     pub async fn listen(&self) {
         loop {
             let conn_string = self.tcp_listener.accept().await;
+            let net_buffer_size = self.net_buffer_size;
             match conn_string {
                 Ok((mut stream, addr)) => {
                     debug!("new connection established: {}", addr);
 
                     let state = self.storage.clone();
 
-                    tokio::spawn(async move { Self::process_stream(&mut stream, state).await });
+                    tokio::spawn(async move { Self::process_stream(&mut stream, state, net_buffer_size).await });
                 }
                 Err(err) => {
                     debug!("error accepting client connection: {:?}", err);
@@ -49,11 +58,11 @@ impl Server {
         }
     }
 
-    async fn process_stream(stream: &mut TcpStream, state: Arc<Storage>) {
+    async fn process_stream(stream: &mut TcpStream, state: Arc<Storage>, net_buffer_size: usize) {
         let (reader_half, writer_half) = stream.split();
 
-        let mut reader = BufReader::with_capacity(8 * 1024, reader_half);
-        let mut writer = BufWriter::with_capacity(8 * 1024, writer_half);
+        let mut reader = BufReader::with_capacity(net_buffer_size, reader_half);
+        let mut writer = BufWriter::with_capacity(net_buffer_size, writer_half);
 
         loop {
             let frame = decode(&mut reader).await;
@@ -103,11 +112,6 @@ async fn apply_command<T: AsyncWriteExt + Unpin>(command: &Command, state: &Arc<
             }
         }
         Command::Set(key, value, ttl) => {
-            // if let Some(ans) = state.set_kv(key, value, *ttl) {
-            //     Frame::new_simple_string(ans)
-            // } else {
-            //     Frame::new_null()
-            // }
             state.set_kv(key, value, *ttl);
             Frame::new_simple_string("OK".to_string())
         }
