@@ -4,15 +4,8 @@ use crate::frame::{decode, Frame, FrameError};
 use std::sync::Arc;
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
-use tracing::{debug, error};
-
-pub struct Config {
-    pub ip_addr: String,
-    pub port: u16,
-    pub capacity: usize,
-    pub shard_count: usize,
-    pub network_buffer_size: usize
-}
+use tracing::{debug, error, info};
+use crate::config::Config;
 
 // @TODO: implement Tracing
 // @TODO: implement Metrics
@@ -31,7 +24,8 @@ impl Server {
             .await
             .expect("failed to start TCP server");
         let storage = Arc::new(Storage::new(cfg.capacity, cfg.shard_count));
-
+        
+        info!("Starting mredis server: {:?}", cfg);
         Server {
             storage,
             tcp_listener,
