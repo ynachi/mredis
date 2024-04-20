@@ -3,6 +3,7 @@ use crate::config::Config;
 use crate::db::Storage;
 use crate::frame::{decode, Frame, FrameError};
 use std::sync::Arc;
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::io::{AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::{TcpListener, TcpStream};
 use tracing::{debug, error, info, warn};
@@ -16,6 +17,7 @@ pub struct Server {
     storage: Arc<Storage>,
     tcp_listener: TcpListener,
     net_buffer_size: usize,
+    conn_limit: Arc<Semaphore>
 }
 
 impl Server {
@@ -24,17 +26,27 @@ impl Server {
             .await
             .expect("failed to start TCP server");
         let storage = Arc::new(Storage::new(cfg.capacity, cfg.shard_count));
-
+        let conn_limit = Arc::new(Semaphore::new(cfg.max_conn));
         info!("Starting mredis server: {:?}", cfg);
         Server {
             storage,
             tcp_listener,
             net_buffer_size: cfg.network_buffer_size,
+            conn_limit
         }
     }
 
     pub async fn listen(&self) {
         loop {
+            // Check if there is room to get a new connection before
+            // We can unwrap because there is only one way this can fail:
+            // the semaphore has been
+            // closed.
+            // And such a case is a programming error, so the program cannot continue.
+            // Acquire_owned is used so that we can move the semaphore lock in the tokio task. 
+            let permit = self.conn_limit.clone().acquire_owned().await
+                .expect("Failed to acquire a permit from the semaphore");
+            
             let conn_string = self.tcp_listener.accept().await;
             let net_buffer_size = self.net_buffer_size;
             match conn_string {
@@ -44,7 +56,12 @@ impl Server {
                     let state = self.storage.clone();
 
                     tokio::spawn(async move {
-                        Self::process_stream(&mut stream, state, net_buffer_size).await
+                        process_stream(&mut stream, state, net_buffer_size).await;
+                        // we no longer need the connection at this point, so drop it before 
+                        // we release the semaphore.
+                        drop(stream);
+                        // release the semaphore
+                        drop(permit);
                     });
                 }
                 Err(err) => {
@@ -53,25 +70,25 @@ impl Server {
             }
         }
     }
+}
 
-    async fn process_stream(stream: &mut TcpStream, state: Arc<Storage>, net_buffer_size: usize) {
-        let (reader_half, writer_half) = stream.split();
+async fn process_stream(stream: &mut TcpStream, state: Arc<Storage>, net_buffer_size: usize) {
+    let (reader_half, writer_half) = stream.split();
 
-        let mut reader = BufReader::with_capacity(net_buffer_size, reader_half);
-        let mut writer = BufWriter::with_capacity(net_buffer_size, writer_half);
+    let mut reader = BufReader::with_capacity(net_buffer_size, reader_half);
+    let mut writer = BufWriter::with_capacity(net_buffer_size, writer_half);
 
-        loop {
-            let frame = decode(&mut reader).await;
-            match frame {
-                Ok(frame) => {
-                    debug!("command frame received!");
-                    process_frame(frame, &state, &mut writer).await;
-                }
-                Err(err) => {
-                    if seen_eof(&err, &mut writer).await {
-                        debug!("client gracefully closed connection");
-                        return;
-                    }
+    loop {
+        let frame = decode(&mut reader).await;
+        match frame {
+            Ok(frame) => {
+                debug!("command frame received!");
+                process_frame(frame, &state, &mut writer).await;
+            }
+            Err(err) => {
+                if seen_eof(&err, &mut writer).await {
+                    debug!("client gracefully closed connection");
+                    return;
                 }
             }
         }
