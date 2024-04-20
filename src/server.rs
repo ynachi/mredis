@@ -56,12 +56,12 @@ impl Server {
                     let state = self.storage.clone();
 
                     tokio::spawn(async move {
-                        process_stream(&mut stream, state, net_buffer_size, permit).await;
+                        process_stream(&mut stream, state, net_buffer_size).await;
                         // we no longer need the connection at this point, so drop it before 
                         // we release the semaphore.
                         drop(stream);
                         // release the semaphore
-                        // drop(permit);
+                        drop(permit);
                     });
                 }
                 Err(err) => {
@@ -72,7 +72,7 @@ impl Server {
     }
 }
 
-async fn process_stream(stream: &mut TcpStream, state: Arc<Storage>, net_buffer_size: usize, permit: OwnedSemaphorePermit) {
+async fn process_stream(stream: &mut TcpStream, state: Arc<Storage>, net_buffer_size: usize) {
     let (reader_half, writer_half) = stream.split();
 
     let mut reader = BufReader::with_capacity(net_buffer_size, reader_half);
@@ -88,7 +88,6 @@ async fn process_stream(stream: &mut TcpStream, state: Arc<Storage>, net_buffer_
             Err(err) => {
                 if seen_eof(&err, &mut writer).await {
                     debug!("client gracefully closed connection");
-                    drop(permit);
                     return;
                 }
             }
