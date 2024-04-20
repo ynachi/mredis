@@ -24,6 +24,10 @@ pub struct Config {
     /// Network read and write buffer size.
     #[clap(name = "buffer", long, short, default_value = "8192")]
     pub network_buffer_size: usize,
+    
+    /// Maximum number of concurrent connections.
+    #[clap(name = "limit", long, short, default_value = "250")]
+    pub max_conn: usize,
 
     /// Max log level.
     #[clap(short, long, default_value_t, value_enum)]
