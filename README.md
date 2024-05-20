@@ -1,11 +1,9 @@
 # Mredis
 
-Another cache server again. I definitively like building cache servers.
+An asynchronous cache server based on Tokio runtime, compatible with RESP3.
 
 Simple cache server to experiment with asynchronous and network programming in Rust.
 
-I have to be honest, I think this project can help somebody learn Rust. If you read the code and have any question,
-concern, feel free to reach out via email or open a github issue. I will be more than  happy to discuss.
 
 ## How the code is organized
 
