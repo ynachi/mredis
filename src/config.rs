@@ -6,7 +6,7 @@ use clap::{Parser, ValueEnum};
 #[command(about = "Simple distributed cache server", long_about = None)]
 pub struct Config {
     /// Hostname or IP address to listen on.
-    #[clap(name = "hostname", long, short, default_value = "127.0.0.1")]
+    #[clap(name = "address", long, short, default_value = "127.0.0.1")]
     pub ip_addr: String,
 
     /// Port to listen on.
@@ -22,9 +22,9 @@ pub struct Config {
     pub shard_count: usize,
 
     /// Network read and write buffer size.
-    #[clap(name = "buffer", long, short, default_value = "8192")]
+    #[clap(name = "buffer", long, short, default_value = "8")]
     pub network_buffer_size: usize,
-    
+
     /// Maximum number of concurrent connections.
     #[clap(name = "limit", long, short, default_value = "250")]
     pub max_conn: usize,
@@ -42,9 +42,10 @@ pub enum Verbosity {
     /// Max level Warning
     Warn,
     /// Max level Info
-    #[default]
+    // #[default]
     Info,
     /// Max level Debug
+    #[default]
     Debug,
     /// Higher level Trace
     Trace,

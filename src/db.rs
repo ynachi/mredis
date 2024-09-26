@@ -6,8 +6,8 @@
 use std::collections::BinaryHeap;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, RwLock};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, Instant};
 
 use rustc_hash::FxHashMap;

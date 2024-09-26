@@ -10,7 +10,7 @@ Simple cache server to experiment with asynchronous and network programming in R
 We use the RESP framing protocol. So you can use a regular redis client to interact with the server. We will show an
 example soon.
 
-- [Framing](src/frame.rs): RESP implementation. This module encodes and decode RESP frames. I wrote RESP implementation
+- [Framing](src/parser): RESP implementation. This module encodes and decode RESP frames. I wrote RESP implementation
 many times but this time, there is something different. I use iterative approach to decode nested frames.
 - [Commands](src/command.rs): Actual user commands. For now, GET, SET, DEL and PING are implemented.
 - [Db](src/db.rs): Sharded Hashmap + Binary Heap. The heap is used to sort entries by expiration. We do not rely on 
