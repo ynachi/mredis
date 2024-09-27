@@ -288,3 +288,32 @@ impl Display for Frame {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_frame_to_command_ping() {
+        let ping_frame = Frame {
+            frame_type: FrameID::Array,
+            frame_data: FrameData::Nested(vec![Frame::new_bulk_string("PING")]),
+        };
+        let response = Command::new(CommandType::PING, &vec!["PONG".to_string()]);
+        assert_eq!(ping_frame.to_command(), response, "can parse ping command without args");
+
+        let ping_frame = Frame {
+            frame_type: FrameID::Array,
+            frame_data: FrameData::Nested(vec![Frame::new_bulk_string("PING"), Frame::new_bulk_string("Hello")]),
+        };
+        let response = Command::new(CommandType::PING, &vec!["Hello".to_string()]);
+        assert_eq!(ping_frame.to_command(), response, "can parse ping command with args");
+
+        let ping_frame = Frame {
+            frame_type: FrameID::Array,
+            frame_data: FrameData::Nested(vec![Frame::new_bulk_string("PING"), Frame::new_bulk_string("Hello"), Frame::new_bulk_string("World")]),
+        };
+        let response = Command::new(CommandType::ERROR, &vec!["PING command must have at most 1 argument".to_string()]);
+        assert_eq!(ping_frame.to_command(), response, "can spot ping command with wrong number of args");
+    }
+}

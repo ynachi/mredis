@@ -24,8 +24,6 @@ pub(crate) enum DecodeError {
     // EmptyBuffer,
     // reached expected EOF
     Eof,
-    // Connection unexpectedly reset
-    ConnectionReset,
     // Unidentified IO error
     IOError,
     // UTF8 to Int error
@@ -44,7 +42,6 @@ impl Display for DecodeError {
             DecodeError::Incomplete => write!(f, "not enough data to decode a full frame"),
             DecodeError::Invalid => write!(f, "frame is not correctly formatted"),
             DecodeError::Eof => write!(f, "seen EOF, this is generally a graceful disconnection"),
-            DecodeError::ConnectionReset => write!(f, "unexpected connection reset"),
             // this error should not happen in practice
             DecodeError::IOError => write!(f, "unexpected IO error"),
             DecodeError::UTF8ToInt => write!(f, "utf8 to int decoding error"),
@@ -62,8 +59,15 @@ impl From<io::Error> for DecodeError {
     fn from(err: io::Error) -> Self {
         match err.kind() {
             ErrorKind::UnexpectedEof => DecodeError::Eof,
-            ErrorKind::ConnectionReset => DecodeError::ConnectionReset,
-            // @TODO: maybe distinguish between fatal IO error and non fatal ones
+            ErrorKind::ConnectionAborted
+            | ErrorKind::BrokenPipe
+            | ErrorKind::ConnectionRefused
+            | ErrorKind::ConnectionReset
+            | ErrorKind::NotConnected => {
+                // log the error here to give more hints to the caller
+                error!("fatal network io error occurred: {}", err);
+                DecodeError::FatalNetworkError
+            },
             _ => DecodeError::IOError,
         }
     }
@@ -340,15 +344,13 @@ where
     }
 
     async fn apply_ping_command(&mut self, command: &Command) {
-        warn!("receive ping command, processing it");
-        let mut response_frame = Frame {
-            frame_type: FrameID::Integer,
-            frame_data: FrameData::Simple(String::from("PONG")),
+        warn!("receive ping command, processing it: {:?}", command);
+        let response_frame = if command.args.len() == 1 {
+            println!("ping command with arg");
+            Frame::new_bulk_string(&command.args[0].clone())
+        } else {
+            Frame::new_simple_string("PONG")
         };
-        if command.args.len() == 2 {
-            response_frame.frame_type = FrameID::BulkString;
-            response_frame.frame_data = FrameData::Bulk(command.args[1].clone());
-        }
         if let Err(err) = self.write_frame(&response_frame).await {
             error!("failed to write to network: {}", err);
         }
@@ -356,10 +358,7 @@ where
 
     async fn apply_error_command(&mut self, command: &Command) {
         warn!("receive error command, processing it");
-        let response_frame = Frame {
-            frame_type: FrameID::BulkError,
-            frame_data: FrameData::Bulk(command.args[1].clone()),
-        };
+        let response_frame = Frame::new_simple_error(&command.args[0].clone());
         if let Err(err) = self.write_frame(&response_frame).await {
             error!("failed to write to network: {}", err);
         }
@@ -699,20 +698,15 @@ mod tests {
             "can decode a nested array"
         );
 
-        let frame_ping = FrameData::Nested(vec![
-            Frame {
-                frame_type: FrameID::BulkString,
-                frame_data: FrameData::Bulk("PING".to_string()),
-            },
-        ]);
+        let frame_ping = FrameData::Nested(vec![Frame {
+            frame_type: FrameID::BulkString,
+            frame_data: FrameData::Bulk("PING".to_string()),
+        }]);
         let response_frame_ping = Frame {
             frame_type: FrameID::Array,
             frame_data: frame_ping,
         };
         let frame_ping = parser.decode_frame().await.unwrap();
-        assert_eq!(
-            frame_ping, response_frame_ping,
-            "can decode ping command"
-        );
+        assert_eq!(frame_ping, response_frame_ping, "can decode ping command");
     }
 }

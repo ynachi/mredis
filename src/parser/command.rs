@@ -1,6 +1,7 @@
 use crate::parser::Frame;
 use std::collections::HashMap;
 
+#[derive(Eq, PartialEq, Debug)]
 pub(crate) enum CommandType {
     PING,
     GET,
@@ -10,6 +11,7 @@ pub(crate) enum CommandType {
     ERROR, // This isn't a command per se. But it is used to send erroneous responses back to the user.
 }
 
+#[derive(Eq, PartialEq, Debug)]
 pub(crate) struct Command {
     pub(crate) command_type: CommandType,
     pub(crate) args: Vec<String>,
