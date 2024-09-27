@@ -85,7 +85,7 @@ impl FrameData {
             _ => None,
         }
     }
-    pub fn get_nested(&self) -> Option<&Vec<Frame>> {
+    pub(crate) fn get_nested(&self) -> Option<&Vec<Frame>> {
         match self {
             FrameData::Nested(value) => Some(value),
             _ => None,
@@ -100,20 +100,20 @@ pub(crate) struct Frame {
 }
 
 impl Frame {
-    pub fn get_array(&self) -> Option<&Vec<Frame>> {
+    pub(crate) fn get_array(&self) -> Option<&Vec<Frame>> {
         if self.frame_type != FrameID::Array {
             return None;
         }
         self.frame_data.get_nested()
     }
-    pub fn get_bulk(&self) -> Option<&String> {
+    pub(crate) fn get_bulk(&self) -> Option<&String> {
         match &self.frame_data {
             FrameData::Bulk(data) => Some(data),
             _ => None,
         }
     }
 
-    pub async fn write_flush_all<T>(&self, stream: &mut BufWriter<T>) -> io::Result<()>
+    pub(crate) async fn write_flush_all<T>(&self, stream: &mut BufWriter<T>) -> io::Result<()>
     where
         T: AsyncWriteExt + Unpin,
     {
@@ -121,42 +121,49 @@ impl Frame {
         stream.flush().await
     }
 
-    pub fn new_bulk_error(inner: &str) -> Frame {
+    pub(crate) fn new_bulk_error(inner: &str) -> Frame {
         Frame {
             frame_type: FrameID::BulkError,
             frame_data: FrameData::Bulk(inner.to_string()),
         }
     }
 
-    pub fn new_simple_string(inner: &str) -> Frame {
+    pub(crate) fn new_simple_string(inner: &str) -> Frame {
         Frame {
             frame_type: FrameID::SimpleString,
             frame_data: FrameData::Simple(inner.to_string()),
         }
     }
 
-    pub fn new_bulk_string(inner: &str) -> Frame {
+    pub(crate) fn new_bulk_string(inner: &str) -> Frame {
         Frame {
             frame_type: FrameID::BulkString,
             frame_data: FrameData::Bulk(inner.to_string()),
         }
     }
 
-    pub fn new_null() -> Frame {
+    pub(crate) fn new_null() -> Frame {
         Frame {
             frame_type: FrameID::Null,
             frame_data: FrameData::Null,
         }
     }
 
-    pub fn new_integer(inner: i64) -> Frame {
+    pub(crate) fn new_integer(inner: i64) -> Frame {
         Frame {
             frame_type: FrameID::Integer,
             frame_data: FrameData::Integer(inner),
         }
     }
 
-    pub fn new_simple_error(inner: &str) -> Frame {
+    pub(crate) fn new_bool(inner: bool) -> Frame {
+        Frame {
+            frame_type: FrameID::Boolean,
+            frame_data: FrameData::Boolean(inner),
+        }
+    }
+
+    pub(crate) fn new_simple_error(inner: &str) -> Frame {
         Frame {
             frame_type: FrameID::SimpleError,
             frame_data: FrameData::Simple(inner.to_string()),

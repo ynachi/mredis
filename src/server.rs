@@ -51,6 +51,7 @@ impl Server {
                 .expect("Failed to acquire a permit from the semaphore");
 
             let conn_string = self.tcp_listener.accept().await;
+
             match conn_string {
                 Ok((stream, addr)) => {
                     debug!("new connection established: {}", addr);

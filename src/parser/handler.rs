@@ -122,9 +122,6 @@ where
                     debug!("command frame received!");
                     let command = frame.to_command();
                     self.apply_command(&command).await;
-                    // do your other stuff
-                    // decode cmd
-                    // apply it
                 }
                 Err(err) => match err {
                     DecodeError::FatalNetworkError => {
@@ -393,17 +390,11 @@ mod tests {
 
         let frame = parser.decode_frame().await.unwrap();
         response_frame = Frame::new_integer(0);
-        assert_eq!(
-            frame, response_frame,
-            "can decode 0 as a number"
-        );
+        assert_eq!(frame, response_frame, "can decode 0 as a number");
 
         let frame = parser.decode_frame().await.unwrap();
         response_frame = Frame::new_integer(-50);
-        assert_eq!(
-            frame, response_frame,
-            "can decode a negative number"
-        );
+        assert_eq!(frame, response_frame, "can decode a negative number");
 
         let frame = parser.decode_frame().await;
         assert_eq!(
@@ -412,7 +403,7 @@ mod tests {
             "cannot convert an non-number  frame to a number"
         );
     }
-    
+
     #[tokio::test]
     async fn test_decode_frame_simple_string() {
         let (mut client, server) = io::duplex(1024);
@@ -586,140 +577,142 @@ mod tests {
             "bulk string is terminated by CRLF"
         );
     }
-}
 
-// #[cfg(test)]
-// mod tests {
-//     use super::*;
-//
-//     #[tokio::test]
-//     async fn decode_test() {
-//         //
-//         // good simple string + decode from the same frame
-//         //
-//         let mut stream = BufReader::new("+OK\r\n+\r\n-err\n".as_bytes());
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::SimpleString);
-//         assert_eq!(frame.frame_data, FrameData::Simple("OK".to_string()));
-//
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::SimpleString);
-//         assert_eq!(frame.frame_data, FrameData::Simple("".to_string()));
-//
-//         // wrongly terminated frame
-//         let frame = decode(&mut stream).await;
-//         assert_eq!(
-//             frame,
-//             Err(FrameError::Invalid),
-//             "There is no CRLF at the end"
-//         );
-//
-//         let frame = decode(&mut stream).await;
-//         assert_eq!(
-//             frame,
-//             Err(FrameError::Eof),
-//             "should return EOF error variant"
-//         );
-//
-//         //
-//         // Bulk + err + int + bool
-//         //
-//         let mut stream = BufReader::new(
-//             "$5\r\nhello\r\n-err\r\n:66\r\n:-5\r\n:0\r\n#t\r\n#f\r\n#n\r\n".as_bytes(),
-//         );
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::BulkString);
-//         assert_eq!(frame.frame_data, FrameData::Bulk(5, "hello".to_string()));
-//
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::SimpleError);
-//         assert_eq!(frame.frame_data, FrameData::Simple("err".to_string()));
-//
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::Integer);
-//         assert_eq!(frame.frame_data, FrameData::Integer(66));
-//
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::Integer);
-//         assert_eq!(frame.frame_data, FrameData::Integer(-5));
-//
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::Integer);
-//         assert_eq!(frame.frame_data, FrameData::Integer(0));
-//
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::Boolean);
-//         assert_eq!(frame.frame_data, FrameData::Boolean(true));
-//
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::Boolean);
-//         assert_eq!(frame.frame_data, FrameData::Boolean(false));
-//
-//         let frame = decode(&mut stream).await;
-//         assert_eq!(frame, Err(FrameError::Invalid), "invalid bool payload");
-//
-//         //
-//         //Array
-//         //
-//         let mut stream = BufReader::new("*3\r\n:1\r\n+Two\r\n$5\r\nThree\r\n".as_bytes());
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::Array);
-//         let frame_data = FrameData::Nested(vec![
-//             Frame {
-//                 frame_type: FrameID::Integer,
-//                 frame_data: FrameData::Integer(1),
-//             },
-//             Frame {
-//                 frame_type: FrameID::SimpleString,
-//                 frame_data: FrameData::Simple("Two".to_string()),
-//             },
-//             Frame {
-//                 frame_type: FrameID::BulkString,
-//                 frame_data: FrameData::Bulk(5, "Three".to_string()),
-//             },
-//         ]);
-//         assert_eq!(frame.frame_data, frame_data);
-//
-//         // nested 1
-//         let mut stream = BufReader::new("*2\r\n:1\r\n*1\r\n+Three\r\n".as_bytes());
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::Array);
-//         let frame_data = FrameData::Nested(vec![
-//             Frame {
-//                 frame_type: FrameID::Integer,
-//                 frame_data: FrameData::Integer(1),
-//             },
-//             Frame {
-//                 frame_type: FrameID::Array,
-//                 frame_data: FrameData::Nested(vec![Frame {
-//                     frame_type: FrameID::SimpleString,
-//                     frame_data: FrameData::Simple("Three".to_string()),
-//                 }]),
-//             },
-//         ]);
-//         assert_eq!(frame.frame_data, frame_data);
-//
-//         // nested 2
-//         let mut stream = BufReader::new("*3\r\n:1\r\n*1\r\n+Three\r\n-Err\r\n".as_bytes());
-//         let frame = decode(&mut stream).await.unwrap();
-//         assert_eq!(frame.frame_type, FrameID::Array);
-//         let frame_data = FrameData::Nested(vec![
-//             Frame {
-//                 frame_type: FrameID::Integer,
-//                 frame_data: FrameData::Integer(1),
-//             },
-//             Frame {
-//                 frame_type: FrameID::Array,
-//                 frame_data: FrameData::Nested(vec![Frame {
-//                     frame_type: FrameID::SimpleString,
-//                     frame_data: FrameData::Simple("Three".to_string()),
-//                 }]),
-//             },
-//             Frame {
-//                 frame_type: FrameID::SimpleError,
-//                 frame_data: FrameData::Simple("Err".to_string()),
-//             },
-//         ]);
-//         assert_eq!(frame.frame_data, frame_data);
-//     }
-// }
+    #[tokio::test]
+    async fn test_decode_frame_bool() {
+        let (mut client, server) = io::duplex(1024);
+        let storage = Arc::new(Storage::new(1000000, 4));
+        let mut parser = Parser::new(server, storage, 1024);
+
+        // Simulate client writing to the stream
+        tokio::spawn(async move {
+            let data = b"#t\r\n#f\r\n$u\r\n";
+            client.write_all(data).await.unwrap();
+            client.flush().await.unwrap();
+        });
+
+        let frame = parser.decode_frame().await.unwrap();
+        let mut response_frame = Frame::new_bool(true);
+        assert_eq!(
+            frame, response_frame,
+            "can decode a bool frame with value true"
+        );
+
+        let frame = parser.decode_frame().await.unwrap();
+        response_frame = Frame::new_bool(false);
+        assert_eq!(
+            frame, response_frame,
+            "can decode a bool frame with value false"
+        );
+
+        let frame = parser.decode_frame().await;
+        assert_eq!(
+            frame,
+            Err(DecodeError::Invalid),
+            "can detect an invalid bool frame (value other than t or f)"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_decode_frame_null() {
+        let (mut client, server) = io::duplex(1024);
+        let storage = Arc::new(Storage::new(1000000, 4));
+        let mut parser = Parser::new(server, storage, 1024);
+
+        // Simulate client writing to the stream
+        tokio::spawn(async move {
+            let data = b"_\r\n_f\r\n$u\r\n";
+            client.write_all(data).await.unwrap();
+            client.flush().await.unwrap();
+        });
+
+        let frame = parser.decode_frame().await.unwrap();
+        let response_frame = Frame::new_null();
+        assert_eq!(frame, response_frame, "can decode a null frame");
+
+        let frame = parser.decode_frame().await;
+        assert_eq!(
+            frame,
+            Err(DecodeError::Invalid),
+            "can spot a null frame which has value, null should not have one"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_decode_frame_array() {
+        let (mut client, server) = io::duplex(1024);
+        let storage = Arc::new(Storage::new(1000000, 4));
+        let mut parser = Parser::new(server, storage, 1024);
+
+        // Simulate client writing to the stream
+        tokio::spawn(async move {
+            let data = b"*3\r\n:1\r\n+Two\r\n$5\r\nThree\r\n*2\r\n:1\r\n*1\r\n+Three\r\n*1\r\n$4\r\nPING\r\n";
+            client.write_all(data).await.unwrap();
+            client.flush().await.unwrap();
+        });
+
+        let frame = parser.decode_frame().await.unwrap();
+        let frame_data = FrameData::Nested(vec![
+            Frame {
+                frame_type: FrameID::Integer,
+                frame_data: FrameData::Integer(1),
+            },
+            Frame {
+                frame_type: FrameID::SimpleString,
+                frame_data: FrameData::Simple("Two".to_string()),
+            },
+            Frame {
+                frame_type: FrameID::BulkString,
+                frame_data: FrameData::Bulk("Three".to_string()),
+            },
+        ]);
+        let response_frame = Frame {
+            frame_type: FrameID::Array,
+            frame_data,
+        };
+        assert_eq!(
+            frame, response_frame,
+            "can decode a non nested array with mixed elements"
+        );
+
+        let frame_data_nested = FrameData::Nested(vec![
+            Frame {
+                frame_type: FrameID::Integer,
+                frame_data: FrameData::Integer(1),
+            },
+            Frame {
+                frame_type: FrameID::Array,
+                frame_data: FrameData::Nested(vec![Frame {
+                    frame_type: FrameID::SimpleString,
+                    frame_data: FrameData::Simple("Three".to_string()),
+                }]),
+            },
+        ]);
+
+        let response_frame_nested = Frame {
+            frame_type: FrameID::Array,
+            frame_data: frame_data_nested,
+        };
+        let frame_nested = parser.decode_frame().await.unwrap();
+        assert_eq!(
+            frame_nested, response_frame_nested,
+            "can decode a nested array"
+        );
+
+        let frame_ping = FrameData::Nested(vec![
+            Frame {
+                frame_type: FrameID::BulkString,
+                frame_data: FrameData::Bulk("PING".to_string()),
+            },
+        ]);
+        let response_frame_ping = Frame {
+            frame_type: FrameID::Array,
+            frame_data: frame_ping,
+        };
+        let frame_ping = parser.decode_frame().await.unwrap();
+        assert_eq!(
+            frame_ping, response_frame_ping,
+            "can decode ping command"
+        );
+    }
+}
