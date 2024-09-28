@@ -2,7 +2,10 @@
 //! This file describe a shared concurrent hashmap used as the backend storage for the cache.
 //! We do not store the state for eviction. Time-based eviction is used and we perform lazy eviction.
 //! If an expired key is read, this key is deleted and no value is returned to the user.
-//! ...
+//! To make reads faster, we decided to not perform lazy eviction there. But performing eviction
+//! only during sets might not be sufficient. So @TODO: implement a scheduled eviction in addition
+//! to the lazy one.
+
 use std::collections::BinaryHeap;
 use std::fmt::Debug;
 use std::hash::{Hash, Hasher};
@@ -116,15 +119,19 @@ impl Storage {
         if shard.latest_is_expired() {
             shard.del_latest();
         }
-        shard.add_or_update_kv(key, value, Instant::now() + ttl)
+        let response = shard.add_or_update_kv(key, value, Instant::now() + ttl);
+        if response.is_some() {
+            self.size.fetch_add(1, Ordering::Release);
+        }
+        response
     }
 
     pub fn get_v(&self, key: &str) -> Option<String> {
         let shard = self.get_shard(key);
         let shard = shard.read().unwrap();
         let maybe_entry = shard.get_value_by_key(key);
+        // lazy eviction, remove the latest key if it has expired
         maybe_entry.cloned()
-        // lazy eviction, remove the last key if it has expired
     }
 
     // fn size(&self) -> usize {
