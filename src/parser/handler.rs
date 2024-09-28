@@ -3,6 +3,7 @@ use crate::parser::{Command, CommandType, Frame, FrameData, FrameID};
 use std::fmt;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::io::{self, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream, ErrorKind};
 use tracing::{debug, error, warn};
 
@@ -67,7 +68,7 @@ impl From<io::Error> for DecodeError {
                 // log the error here to give more hints to the caller
                 error!("fatal network io error occurred: {}", err);
                 DecodeError::FatalNetworkError
-            },
+            }
             _ => DecodeError::IOError,
         }
     }
@@ -336,6 +337,12 @@ where
             CommandType::PING => {
                 self.apply_ping_command(command).await;
             }
+            CommandType::GET => {
+                self.apply_get_command(command).await;
+            }
+            CommandType::SET => {
+                self.apply_set_command(command).await;
+            }
             CommandType::ERROR => {
                 self.apply_error_command(command).await;
             }
@@ -344,9 +351,8 @@ where
     }
 
     async fn apply_ping_command(&mut self, command: &Command) {
-        warn!("receive ping command, processing it: {:?}", command);
+        debug!("receive ping command, processing it: {:?}", command);
         let response_frame = if command.args.len() == 1 {
-            println!("ping command with arg");
             Frame::new_bulk_string(&command.args[0].clone())
         } else {
             Frame::new_simple_string("PONG")
@@ -356,8 +362,38 @@ where
         }
     }
 
+    async fn apply_get_command(&mut self, command: &Command) {
+        debug!("receive get command, processing it: {:?}", command);
+        let value = self.storage.get_v(&command.args[0]);
+        let response_frame = match value {
+            Some(value) => Frame::new_simple_string(&value),
+            None => Frame::new_null(),
+        };
+
+        if let Err(err) = self.write_frame(&response_frame).await {
+            error!("failed to write to network: {}", err);
+        }
+    }
+
+    async fn apply_set_command(&mut self, command: &Command) {
+        debug!("receive set command, processing it: {:?}", command);
+        // this conversion is guaranteed to succeed because we check while parsing a frame to a command
+        let expiration = if command.args.len() == 3 {
+            command.args[2].parse::<u64>().unwrap_or(0)
+        } else {
+            0
+        };
+        let ttl = Duration::from_millis(expiration);
+        self.storage.set_kv(&command.args[0], &command.args[0], ttl);
+        
+        let response_frame = Frame::new_simple_string("OK");
+        if let Err(err) = self.write_frame(&response_frame).await {
+            error!("failed to write to network: {}", err);
+        }
+    }
+
     async fn apply_error_command(&mut self, command: &Command) {
-        warn!("receive error command, processing it");
+        debug!("receive error command, processing it");
         let response_frame = Frame::new_simple_error(&command.args[0].clone());
         if let Err(err) = self.write_frame(&response_frame).await {
             error!("failed to write to network: {}", err);

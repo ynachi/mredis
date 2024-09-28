@@ -55,4 +55,62 @@ impl Command {
 
         ping_cmd
     }
+
+    pub(crate) fn parse_get_command(frames: &[Frame]) -> Command {
+        if frames.len() != 2 {
+            return Command {
+                command_type: CommandType::ERROR,
+                args: vec!["GET command must have at exactly 1 argument".to_string()],
+            };
+        }
+
+        let set_cmd = Command {
+            command_type: CommandType::GET,
+            args: vec![frames[1].get_bulk().unwrap().to_string()],
+        };
+
+        set_cmd
+    }
+
+    pub(crate) fn parse_set_command_set(frames: &[Frame]) -> Command {
+        // note: we can unwrap get_bulk in this function because the frame
+        // has been checked upfront. @TODO: maybe refactor to give a number instead of an option, then.
+        let len = frames.len();
+        if len != 3 && len != 5 {
+            return Command {
+                command_type: CommandType::ERROR,
+                args: vec!["SET should take 2 or 4 arguments".to_string()],
+            };
+        }
+        let key = frames[1].get_bulk().unwrap();
+        let value = frames[2].get_bulk().unwrap();
+
+        // check if we've got the right option to set the time in millis
+        if len == 5 {
+            let ping_opt = frames[3].get_bulk().unwrap();
+            if ping_opt.to_uppercase() == "PX" {
+                let expiration = frames[4].get_bulk().unwrap();
+                // also check if expiration can be converted to a number, because we do not want the caller of this method to check anything
+                // Ensure that expiration is convertible to a number
+                if expiration.parse::<u64>().is_err() {
+                    return Command {
+                        command_type: CommandType::ERROR,
+                        args: vec!["expiration should be a valid number".to_string()],
+                    };
+                }
+                return Command {
+                    command_type: CommandType::SET,
+                    args: vec![key.to_string(), value.to_string(), expiration.to_string()],
+                };
+            }
+            return Command {
+                command_type: CommandType::ERROR,
+                args: vec![format!("unknown option '{}' for SET command", ping_opt)],
+            };
+        }
+        Command {
+            command_type: CommandType::SET,
+            args: vec![key.to_string(), value.to_string()],
+        }
+    }
 }

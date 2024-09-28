@@ -22,7 +22,7 @@ pub struct Config {
     pub shard_count: usize,
 
     /// Network read and write buffer size.
-    #[clap(name = "buffer", long, short, default_value = "8")]
+    #[clap(name = "buffer", long, short, default_value = "8192")]
     pub network_buffer_size: usize,
 
     /// Maximum number of concurrent connections.
@@ -42,10 +42,10 @@ pub enum Verbosity {
     /// Max level Warning
     Warn,
     /// Max level Info
-    // #[default]
+    #[default]
     Info,
     /// Max level Debug
-    #[default]
+    //#[default]
     Debug,
     /// Higher level Trace
     Trace,

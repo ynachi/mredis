@@ -4,7 +4,8 @@ use crate::parser::Parser;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
-use tracing::{debug, error, info, warn};
+use std::process;
+use tracing::{debug, error, info};
 
 // @TODO: implement Tracing
 // @TODO: implement Metrics
@@ -20,9 +21,13 @@ pub struct Server {
 
 impl Server {
     pub async fn new(cfg: &Config) -> Self {
-        let tcp_listener = TcpListener::bind((cfg.ip_addr.to_owned(), cfg.port))
-            .await
-            .expect("failed to start TCP server");
+        let tcp_listener = match TcpListener::bind((cfg.ip_addr.to_owned(), cfg.port)).await {
+            Ok(tcp_listener) => tcp_listener,
+            Err(e) => {
+                error!("failed to start the TCP server: {}", e);
+                process::exit(1);
+            }
+        };
         let storage = Arc::new(Storage::new(cfg.capacity, cfg.shard_count));
         let conn_limit = Arc::new(Semaphore::new(cfg.max_conn));
         info!("Starting mredis server: {:?}", cfg);

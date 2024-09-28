@@ -1,7 +1,6 @@
 use crate::parser::{Command, CommandType};
 use std::fmt;
 use std::fmt::{Display, Formatter};
-use tokio::io::{self, AsyncWriteExt, BufWriter};
 use tracing::debug;
 
 /// `FrameID` is used to mark the beginning of a frame type. We have decided to implement only what
@@ -113,14 +112,6 @@ impl Frame {
         }
     }
 
-    pub(crate) async fn write_flush_all<T>(&self, stream: &mut BufWriter<T>) -> io::Result<()>
-    where
-        T: AsyncWriteExt + Unpin,
-    {
-        stream.write_all(self.to_string().as_bytes()).await?;
-        stream.flush().await
-    }
-
     pub(crate) fn new_bulk_error(inner: &str) -> Frame {
         Frame {
             frame_type: FrameID::BulkError,
@@ -184,17 +175,19 @@ impl Frame {
         if let Some(command_type) = Command::make_redis_command_map().get(cmd_name.as_str()) {
             return match command_type {
                 CommandType::PING => Command::parse_ping_command(args_frames),
+                CommandType::GET => Command::parse_get_command(args_frames),
+                CommandType::SET => Command::parse_set_command_set(args_frames),
                 // err commands are called NO_NAME
                 _ => Command {
                     command_type: CommandType::ERROR,
-                    args: vec!["NO_NAME".to_string(), "hello".to_string()],
+                    args: vec!["hello".to_string()],
                 },
             };
         }
 
         // Informing that an unknown command was received.
         let msg = format!("unknown command '{cmd_name}'");
-        Command::new(CommandType::ERROR, &vec![cmd_name, msg])
+        Command::new(CommandType::ERROR, &vec![msg])
     }
 
     // checks if a Frame can be used to successfully parse a command without actually parsing it.
@@ -228,7 +221,6 @@ impl Frame {
                 });
             }
         }
-
         None
     }
 }
@@ -292,7 +284,7 @@ impl Display for Frame {
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_frame_to_command_ping() {
         let ping_frame = Frame {
@@ -300,20 +292,63 @@ mod tests {
             frame_data: FrameData::Nested(vec![Frame::new_bulk_string("PING")]),
         };
         let response = Command::new(CommandType::PING, &vec!["PONG".to_string()]);
-        assert_eq!(ping_frame.to_command(), response, "can parse ping command without args");
+        assert_eq!(
+            ping_frame.to_command(),
+            response,
+            "can parse ping command without args"
+        );
 
         let ping_frame = Frame {
             frame_type: FrameID::Array,
-            frame_data: FrameData::Nested(vec![Frame::new_bulk_string("PING"), Frame::new_bulk_string("Hello")]),
+            frame_data: FrameData::Nested(vec![
+                Frame::new_bulk_string("PING"),
+                Frame::new_bulk_string("Hello"),
+            ]),
         };
         let response = Command::new(CommandType::PING, &vec!["Hello".to_string()]);
-        assert_eq!(ping_frame.to_command(), response, "can parse ping command with args");
+        assert_eq!(
+            ping_frame.to_command(),
+            response,
+            "can parse ping command with args"
+        );
 
         let ping_frame = Frame {
             frame_type: FrameID::Array,
-            frame_data: FrameData::Nested(vec![Frame::new_bulk_string("PING"), Frame::new_bulk_string("Hello"), Frame::new_bulk_string("World")]),
+            frame_data: FrameData::Nested(vec![
+                Frame::new_bulk_string("PING"),
+                Frame::new_bulk_string("Hello"),
+                Frame::new_bulk_string("World"),
+            ]),
         };
-        let response = Command::new(CommandType::ERROR, &vec!["PING command must have at most 1 argument".to_string()]);
-        assert_eq!(ping_frame.to_command(), response, "can spot ping command with wrong number of args");
+        let response = Command::new(
+            CommandType::ERROR,
+            &vec!["PING command must have at most 1 argument".to_string()],
+        );
+        assert_eq!(
+            ping_frame.to_command(),
+            response,
+            "can spot ping command with wrong number of args"
+        );
+    }
+
+    #[test]
+    fn test_frame_to_command_unknown() {
+        let ping_frame = Frame {
+            frame_type: FrameID::Array,
+            frame_data: FrameData::Nested(vec![
+                Frame::new_bulk_string("PIN"),
+                Frame::new_bulk_string("Hello"),
+                Frame::new_bulk_string("World"),
+            ]),
+        };
+        let response = Command::new(
+            CommandType::ERROR,
+            &vec!["unknown command 'PIN'".to_string()],
+        );
+        assert_eq!(
+            ping_frame.to_command(),
+            response,
+            "can spot ping command with wrong number of args"
+        );
     }
 }
