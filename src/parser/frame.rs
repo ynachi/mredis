@@ -176,11 +176,13 @@ impl Frame {
             return match command_type {
                 CommandType::PING => Command::parse_ping_command(args_frames),
                 CommandType::GET => Command::parse_get_command(args_frames),
-                CommandType::SET => Command::parse_set_command_set(args_frames),
-                // err commands are called NO_NAME
-                _ => Command {
+                CommandType::SET => Command::parse_set_command(args_frames),
+                CommandType::DEL => Command::parse_del_command(args_frames),
+                CommandType::EXPIRE => Command::parse_expire_command(args_frames),
+                CommandType::ERROR => Command {
                     command_type: CommandType::ERROR,
-                    args: vec!["hello".to_string()],
+                    // safe to unwrap as the frame as been checked upfront
+                    args: vec![args_frames[0].get_bulk().unwrap().to_string()],
                 },
             };
         }
@@ -193,12 +195,11 @@ impl Frame {
     // checks if a Frame can be used to successfully parse a command without actually parsing it.
     // It returns a frame error if it cannot and None when it can.
     fn validate_command_array(&self) -> Option<Command> {
-        let err_command_name = "NO_NAME".to_string();
         if self.frame_type != FrameID::Array {
             let msg = "only array can represent a redis command".to_string();
             return Some(Command {
                 command_type: CommandType::ERROR,
-                args: vec![err_command_name, msg],
+                args: vec![msg],
             });
         }
 
@@ -208,7 +209,7 @@ impl Frame {
             let msg = "cannot parse command from empty frame array".to_string();
             return Some(Command {
                 command_type: CommandType::ERROR,
-                args: vec![err_command_name, msg],
+                args: vec![msg],
             });
         }
 
@@ -217,7 +218,7 @@ impl Frame {
                 let msg = format!("invalid frame type: {:?}", frame.frame_type);
                 return Some(Command {
                     command_type: CommandType::ERROR,
-                    args: vec![err_command_name, msg],
+                    args: vec![msg],
                 });
             }
         }

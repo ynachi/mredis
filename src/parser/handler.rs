@@ -5,7 +5,7 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::{self, AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufStream, ErrorKind};
-use tracing::{debug, error, warn};
+use tracing::{debug, error};
 
 pub struct Parser<T>
 where
@@ -343,6 +343,12 @@ where
             CommandType::SET => {
                 self.apply_set_command(command).await;
             }
+            CommandType::DEL => {
+                self.apply_del_command(command).await;
+            }
+            CommandType::EXPIRE => {
+                self.apply_expire_command(command).await;
+            }
             CommandType::ERROR => {
                 self.apply_error_command(command).await;
             }
@@ -384,7 +390,7 @@ where
             0
         };
         let ttl = Duration::from_millis(expiration);
-        self.storage.set_kv(&command.args[0], &command.args[0], ttl);
+        self.storage.set_kv(&command.args[0], &command.args[1], ttl);
         
         let response_frame = Frame::new_simple_string("OK");
         if let Err(err) = self.write_frame(&response_frame).await {
@@ -398,6 +404,23 @@ where
         if let Err(err) = self.write_frame(&response_frame).await {
             error!("failed to write to network: {}", err);
         }
+    }
+
+    async fn apply_del_command(&mut self, command: &Command) {
+        debug!("receive del command, processing it: {:?}", command);
+        
+        let num_deleted = self.storage.del_entries(&command.args);
+        
+        let response_frame = Frame::new_integer(num_deleted as i64);
+
+        if let Err(err) = self.write_frame(&response_frame).await {
+            error!("failed to write to network: {}", err);
+        }
+    }
+
+    async fn apply_expire_command(&mut self, command: &Command) {
+        debug!("receive expire command, processing it: {:?}", command);
+        unimplemented!("implement me");
     }
 }
 

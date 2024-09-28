@@ -72,7 +72,7 @@ impl Command {
         set_cmd
     }
 
-    pub(crate) fn parse_set_command_set(frames: &[Frame]) -> Command {
+    pub(crate) fn parse_set_command(frames: &[Frame]) -> Command {
         // note: we can unwrap get_bulk in this function because the frame
         // has been checked upfront. @TODO: maybe refactor to give a number instead of an option, then.
         let len = frames.len();
@@ -112,5 +112,31 @@ impl Command {
             command_type: CommandType::SET,
             args: vec![key.to_string(), value.to_string()],
         }
+    }
+
+    pub(crate) fn parse_del_command(frames: &[Frame]) -> Command {
+        // note: we can unwrap get_bulk in this function because the frame
+        // has been checked upfront. @TODO: maybe refactor to give a number instead of an option, then.
+        let len = frames.len();
+        if len <2  {
+            return Command {
+                command_type: CommandType::ERROR,
+                args: vec!["DEL command must at least one arg".to_string()],
+            };
+        }
+        
+        let mut keys = Vec::with_capacity(len-1);
+        for i in 1..len {
+            keys.push(frames[i].get_bulk().unwrap().to_string());
+        }
+        
+        Command {
+            command_type: CommandType::DEL,
+            args: keys,
+        }
+    }
+
+    pub(crate) fn parse_expire_command(frames: &[Frame]) -> Command {
+        unimplemented!("TODO: implement later")
     }
 }
