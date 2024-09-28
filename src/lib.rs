@@ -5,9 +5,7 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(clippy::upper_case_acronyms)]
 
-pub mod command;
-pub mod db;
-pub mod frame;
-
 pub mod config;
+pub mod db;
+mod parser;
 pub mod server;
