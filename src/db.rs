@@ -1,7 +1,6 @@
 //! Sharded Map for caching
 //! This file describe a shared concurrent hashmap used as the backend storage for the cache.
 //! We do not store the state for eviction. Time-based eviction is used and we perform lazy eviction.
-//! If an expired key is read, this key is deleted and no value is returned to the user.
 //! To make reads faster, we decided to not perform lazy eviction there. But performing eviction
 //! only during sets might not be sufficient. So @TODO: implement a scheduled eviction in addition
 //! to the lazy one.
@@ -134,10 +133,6 @@ impl Storage {
         maybe_entry.cloned()
     }
 
-    // fn size(&self) -> usize {
-    //     self.size.load(Ordering::Relaxed)
-    // }
-
     pub(crate) fn del_entries(&self, keys: &Vec<String>) -> usize {
         let mut count = 0;
         for key in keys {
@@ -193,7 +188,5 @@ mod tests {
         storage.set_kv("ent1", "V1", Duration::from_millis(180));
         storage.set_kv("ent2", "V1", Duration::from_millis(300));
         storage.set_kv("ent3", "V1", Duration::from_millis(100));
-        // let ent2 = storage.get_oldest().unwrap();
-        // assert_eq!(ent2, "ent2", "Oldest value should be ent2");
     }
 }
