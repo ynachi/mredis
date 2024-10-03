@@ -21,8 +21,6 @@ pub(crate) enum DecodeError {
     Incomplete,
     // Frame is not correctly formatted
     Invalid,
-    // Empty buffer should not be passed to get frame from, so this is an error.
-    // EmptyBuffer,
     // reached expected EOF
     Eof,
     // Unidentified IO error
@@ -43,7 +41,6 @@ impl Display for DecodeError {
             DecodeError::Incomplete => write!(f, "not enough data to decode a full frame"),
             DecodeError::Invalid => write!(f, "frame is not correctly formatted"),
             DecodeError::Eof => write!(f, "seen EOF, this is generally a graceful disconnection"),
-            // this error should not happen in practice
             DecodeError::IOError => write!(f, "unexpected IO error"),
             DecodeError::UTF8ToInt => write!(f, "utf8 to int decoding error"),
             DecodeError::UnknownFrame => write!(f, "unable to identify the frame type"),
@@ -352,7 +349,6 @@ where
             CommandType::ERROR => {
                 self.apply_error_command(command).await;
             }
-            _ => unimplemented!(),
         }
     }
 
@@ -391,7 +387,7 @@ where
         };
         let ttl = Duration::from_millis(expiration);
         self.storage.set_kv(&command.args[0], &command.args[1], ttl);
-        
+
         let response_frame = Frame::new_simple_string("OK");
         if let Err(err) = self.write_frame(&response_frame).await {
             error!("failed to write to network: {}", err);
@@ -408,9 +404,9 @@ where
 
     async fn apply_del_command(&mut self, command: &Command) {
         debug!("receive del command, processing it: {:?}", command);
-        
+
         let num_deleted = self.storage.del_entries(&command.args);
-        
+
         let response_frame = Frame::new_integer(num_deleted as i64);
 
         if let Err(err) = self.write_frame(&response_frame).await {

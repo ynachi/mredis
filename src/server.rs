@@ -1,10 +1,10 @@
 use crate::config::Config;
 use crate::db::Storage;
 use crate::parser::Parser;
+use std::process;
 use std::sync::Arc;
 use tokio::net::TcpListener;
 use tokio::sync::Semaphore;
-use std::process;
 use tracing::{debug, error, info};
 
 // @TODO: implement Tracing
